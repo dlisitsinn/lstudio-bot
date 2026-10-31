@@ -938,3 +938,14 @@ def test_batch_captcha_pause_resume_stop_and_limit():
     assert app3.batch["sent"] < 10 and "остановлено" in app3.state()["log"][0]["text"]
     app3.vkb.state = "login"
     assert "войдите" in app3.start_vk_batch(ids3)["error"]
+
+
+def test_settings_migration(tmp_path):
+    from lsbot import migrations
+    (tmp_path / ".env").write_text("SMTP_USER=a@b.ru\nVK_DAILY_LIMIT=20\n", encoding="utf-8")
+    assert migrations.apply(tmp_path) == ["VK_DAILY_LIMIT=2000"]
+    assert "VK_DAILY_LIMIT=2000" in (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "SMTP_USER=a@b.ru" in (tmp_path / ".env").read_text(encoding="utf-8")
+    (tmp_path / ".env").write_text("VK_DAILY_LIMIT=50\n", encoding="utf-8")   # потом поменяли сами
+    assert migrations.apply(tmp_path) == []                                   # второй раз не трогаем
+    assert "VK_DAILY_LIMIT=50" in (tmp_path / ".env").read_text(encoding="utf-8")

@@ -51,7 +51,7 @@ class App:
                       "current": "", "captcha": False}
         self._batch_stop = threading.Event()
         self._batch_resume = threading.Event()
-        self.batch_pause = (5, 12)   # пауза между сообщениями, секунд
+        self.batch_pause = (3, 6)    # пауза между сообщениями, секунд
         if cfg.only_vk:
             self._hide_without_vk()
 
@@ -311,13 +311,18 @@ class App:
         if not text:
             return {"error": "Текст сообщения пустой"}
         with self._vk_lock:
-            wait = 3 - (time.monotonic() - self._vk_last_send)   # защита от двойного нажатия
+            wait = 1.5 - (time.monotonic() - self._vk_last_send)   # защита от двойного нажатия
             if wait > 0:
                 self._sleep(wait)
             try:
                 res = self.vkb.send(target, text)
             finally:
                 self._vk_last_send = time.monotonic()
+        if res.get("gid") and not r["vk_group_id"]:
+            try:   # запоминаем ID — в следующий раз сразу в диалог
+                self.store.update_fields(r["id"], vk_group_id=int(res["gid"]))
+            except (ValueError, TypeError):
+                pass
         if res.get("ok"):
             self.store.set_status(r["id"], "contacted", "написали во ВК")
             self.store.log_send(r["id"], f"vk:{target}", True)

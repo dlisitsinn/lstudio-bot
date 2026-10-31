@@ -81,6 +81,9 @@ def main():
         if example.exists():
             (BASE_DIR / ".env").write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
             print("Создала файл .env — почту и токен можно вписать позже.")
+    from lsbot import migrations
+    for line in migrations.apply(BASE_DIR):
+        print(f"Настройка обновлена: {line}")
     cfg = load_config()
     if len(sys.argv) > 1 and sys.argv[1] == "check":
         cmd_check(cfg)

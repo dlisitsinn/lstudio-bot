@@ -173,24 +173,59 @@ class VKBrowser:
         else:
             self._set("login", "Войдите во ВК в открывшемся окне браузера — бот подождёт")
 
-    def _find_input(self, timeout_ms=10000):
+    def _find_input(self, timeout_ms=8000):
+        """Ждём поле ввода сообщения, капчу или надпись «сообщения закрыты» — что появится раньше."""
+        combined = ", ".join(INPUT_SELECTORS)
+        captcha = ", ".join(CAPTCHA_SELECTORS)
         deadline = time.monotonic() + timeout_ms / 1000
         while time.monotonic() < deadline:
-            for sel in CAPTCHA_SELECTORS:
-                loc = self._page.locator(sel)
-                if loc.count() and loc.first.is_visible():
-                    return "captcha"
-            for sel in INPUT_SELECTORS:
-                loc = self._page.locator(sel)
-                if loc.count() and loc.first.is_visible():
-                    return loc.first
             try:
-                body = (self._page.inner_text("body", timeout=1000) or "").lower()
+                self._page.wait_for_selector(f"{combined}, {captcha}", state="visible", timeout=1200)
+            except Exception:
+                pass
+            cap = self._page.locator(captcha)
+            if cap.count() and cap.first.is_visible():
+                return "captcha"
+            box = self._page.locator(combined)
+            if box.count() and box.first.is_visible():
+                return box.first
+            try:
+                body = (self._page.inner_text("body", timeout=800) or "").lower()
             except Exception:
                 body = ""
             if any(m in body for m in CLOSED_MARKERS):
                 return "closed"
-            self._page.wait_for_timeout(300)
+        return None
+
+    def _base_for_cookies(self):
+        """ВК переехал на vk.ru: открываем тот домен, где вы вошли."""
+        try:
+            for c in self._ctx.cookies():
+                if c["name"].startswith(("remixsid", "remixnsid")) and c.get("value"):
+                    dom = c.get("domain", "").lstrip(".")
+                    if dom.endswith("vk.ru"):
+                        return "https://vk.ru"
+                    if dom.endswith("vk.com"):
+                        return "https://vk.com"
+        except Exception:
+            pass
+        return self.base
+
+    def resolve_id(self, screen: str):
+        """Числовой ID сообщества по короткому адресу — берём со страницы группы."""
+        import re
+        screen = str(screen).strip().strip("/")
+        m = re.fullmatch(r"(?:club|public|event)?(\d+)", screen)
+        if m:
+            return m.group(1)
+        base = self._base_for_cookies() if self.base in (VK_BASE, "https://vk.ru") else self.base
+        self._page.goto(f"{base}/{screen}", wait_until="domcontentloaded")
+        html = self._page.content()
+        for pat in (r'"group_id"\s*:\s*"?(\d+)', r'im\?sel=-(\d+)', r'/im/convo/-(\d+)', r'wall-(\d+)_',
+                    r'"oid"\s*:\s*-(\d+)', r'/(?:club|public)(\d+)', r'photo-(\d+)_', r'video-(\d+)_'):
+            m = re.search(pat, html)
+            if m:
+                return m.group(1)
         return None
 
     def _send(self, target, text):
@@ -198,26 +233,21 @@ class VKBrowser:
         if self.state != "ready":
             return {"error": self.message}
         target = str(target)
-        # по ID — сразу диалог; по короткому адресу — страница сообщества и кнопка «Написать сообщение»
-        url = f"{self.base}/im?sel=-{target}" if target.isdigit() else f"{self.base}/{target}"
         self._page.bring_to_front()
-        self._page.goto(url, wait_until="domcontentloaded")
-        if not target.isdigit():
-            btn = self._page.get_by_role("button", name="Написать сообщение")
-            link = self._page.get_by_role("link", name="Написать сообщение")
-            for loc in (btn, link):
-                if loc.count():
-                    loc.first.click()
-                    break
-            else:
-                return {"error": "У сообщества нет кнопки «Написать сообщение» — сообщения закрыты",
-                        "closed": True}
+        gid = target if target.isdigit() else self.resolve_id(target)
+        if not gid:
+            return {"error": "Не удалось открыть сообщество — возможно, его удалили или адрес неверный",
+                    "closed": True}
+        base = self._base_for_cookies() if self.base in (VK_BASE, "https://vk.ru") else self.base
+        self._page.goto(f"{base}/im?sel=-{gid}", wait_until="domcontentloaded")
         box = self._find_input()
         if box == "captcha":
-            return {"error": "ВК показал капчу — решите её в окне браузера и нажмите пробел ещё раз"}
+            return {"error": "ВК показал капчу — решите её в окне браузера и нажмите пробел ещё раз", "gid": gid}
         if box == "closed" or box is None:
-            return {"error": "Не нашла поле для сообщения — возможно, у сообщества закрыты сообщения",
-                    "closed": True}
+            return {"error": "У сообщества закрыты сообщения", "closed": True, "gid": gid}
+        if "/im" not in self._page.url:
+            # защита: печатаем только в мессенджере, никогда — в комментарии на странице
+            return {"error": "Открылся не диалог, а другая страница — ничего не отправила", "gid": gid}
         box.click()
         lines = text.replace("\r\n", "\n").split("\n")
         for i, line in enumerate(lines):
@@ -226,17 +256,16 @@ class VKBrowser:
             if i < len(lines) - 1:
                 self._page.keyboard.press("Shift+Enter")
         self._page.keyboard.press("Enter")
-        # проверяем, что сообщение ушло: поле ввода очистилось
-        for _ in range(20):
-            self._page.wait_for_timeout(200)
+        for _ in range(25):               # сообщение ушло, когда поле очистилось
+            self._page.wait_for_timeout(120)
             try:
                 if not (box.inner_text() or "").strip():
-                    return {"ok": True}
+                    return {"ok": True, "gid": gid}
             except Exception:
-                return {"ok": True}
-        if self._find_input(1000) == "captcha":
-            return {"error": "ВК показал капчу — решите её в окне браузера и нажмите пробел ещё раз"}
-        return {"error": "Текст вставлен, но не отправился — посмотрите на окно браузера"}
+                return {"ok": True, "gid": gid}
+        if self._find_input(800) == "captcha":
+            return {"error": "ВК показал капчу — решите её в окне браузера и нажмите пробел ещё раз", "gid": gid}
+        return {"error": "Текст вставлен, но не отправился — посмотрите на окно браузера", "gid": gid}
 
     def _shutdown(self):
         for obj in (self._ctx, self._pw):

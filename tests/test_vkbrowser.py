@@ -58,11 +58,14 @@ class FakeVK(BaseHTTPRequestHandler):
             return self._html('<img src="/captcha.php?sid=1" width=130 height=50>')
         if u.path == "/im":
             return self._html(BOX)
-        if u.path == "/lavanda74":
-            return self._html("""<h1>Лаванда</h1><button onclick="document.getElementById('w').hidden=false">Написать сообщение</button>
-                <div id="w" hidden>""" + BOX + "</div>")
+        if u.path == "/lavanda74":   # как настоящая группа: кнопка открывает чат в другой вкладке, есть поле комментария
+            return self._html("""<h1>Лаванда</h1><a href="/im?sel=-777" target="_blank">Написать сообщение</a>
+                <a href="/wall-777_15">Пост</a>
+                <div id="comment" contenteditable="true" role="textbox"></div>
+                <script>document.getElementById('comment').addEventListener('keydown', e => {
+                  if (e.key === 'Enter') fetch('/comment', {method: 'POST', body: '{"peer":"COMMENT","text":"x"}'}); });</script>""")
         if u.path == "/closedgroup":
-            return self._html("<h1>Группа без сообщений</h1>")
+            return self._html('<h1>Группа без сообщений</h1><a href="/wall-999_3">Пост</a>')
         self._html("ok")
 
     def do_POST(self):
@@ -98,16 +101,20 @@ def test_browser_flow(fake_vk, tmp_path):
         assert wait_state(b, "ready"), b.status()
 
         r = b.send("123", "Здравствуйте!\nВторая строка")
-        assert r == {"ok": True}, r
+        assert r.get("ok"), r
         assert STATE["sent"][-1]["text"].replace("\r", "") .strip() == "Здравствуйте!\nВторая строка"
         assert "-123" in STATE["sent"][-1]["peer"]
 
         r = b.send("lavanda74", "Привет, Лаванда")                         # по короткому адресу
-        assert r == {"ok": True}, r
+        assert r.get("ok") and r["gid"] == "777", r                        # ID найден на странице группы
         assert STATE["sent"][-1]["text"].strip() == "Привет, Лаванда"
+        assert "-777" in STATE["sent"][-1]["peer"]
+        assert not any(x["peer"] == "COMMENT" for x in STATE["sent"])     # в комментарий не написано
 
         sent_before = len(STATE["sent"])
-        assert b.send("closedgroup", "x").get("closed")                    # нет кнопки «Написать»
+        t0 = time.monotonic()
+        assert b.send("closedgroup", "x").get("closed")                    # сообщения закрыты
+        assert time.monotonic() - t0 < 5                                   # распознано быстро
         r = b.send("555", "x")
         assert "капчу" in r["error"]
         assert len(STATE["sent"]) == sent_before                           # ничего лишнего не ушло
