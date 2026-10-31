@@ -331,7 +331,7 @@ class App:
             self.store.update_fields(r["id"], note="сообщения сообщества закрыты")
         return res
 
-    # ---------- отправка отмеченных карточек (не больше 10 за раз) ----------
+    # ---------- отправка отмеченных карточек (не больше BATCH_MAX за раз) ----------
     BATCH_MAX = 100
 
     def start_vk_batch(self, ids, texts=None):

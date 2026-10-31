@@ -899,16 +899,17 @@ def _wait_batch(app, timeout=5):
         _t.sleep(0.02)
 
 
-def test_batch_sends_max_10_and_skips_closed_quietly():
-    app, store, ids = batch_app(plan=["ok", "closed", "ok"])
+def test_batch_sends_max_and_skips_closed_quietly():
+    m = App.BATCH_MAX
+    app, store, ids = batch_app(n=m + 2, plan=["ok", "closed", "ok"], limit=m + 10)
     r = app.start_vk_batch(ids, {str(ids[0]): "Свой текст"})
-    assert r == {"ok": True, "total": 10}                               # больше 10 за раз нельзя
+    assert r == {"ok": True, "total": m}                                # больше BATCH_MAX за раз нельзя
     _wait_batch(app)
     b = app.state()["batch"]
-    assert b["sent"] == 9 and b["closed"] == 1 and b["errors"] == 0 and not b["running"]
+    assert b["sent"] == m - 1 and b["closed"] == 1 and b["errors"] == 0 and not b["running"]
     assert app.vkb.sent[0] == ("100", "Свой текст")                     # правка текста сохранилась
     assert store.get(ids[1])["status"] == "skipped" and "закрыты" in store.get(ids[1])["note"]
-    assert store.get(ids[10])["status"] == "manual"                     # 11-я не тронута
+    assert store.get(ids[m])["status"] == "manual"                      # следующая за пределом не тронута
     assert "у 1 закрыты сообщения" in app.state()["log"][0]["text"]
 
 
