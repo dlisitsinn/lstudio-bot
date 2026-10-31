@@ -40,6 +40,7 @@ class Config:
     db_path: Path
     port: int = 8765
     vk_daily_limit: int = 20
+    only_vk: bool = True
 
     def email_ready(self) -> bool:
         return bool(self.smtp_host and self.smtp_user and self.smtp_password)
@@ -79,6 +80,7 @@ def load_config(env_path: Path = None) -> Config:
         sender_name=get("SENDER_NAME", "LStudio"),
         daily_email_limit=_int(get("DAILY_EMAIL_LIMIT"), 25),
         vk_daily_limit=max(1, min(_int(get("VK_DAILY_LIMIT"), 20), 5000)),
+        only_vk=get("ONLY_VK", "да").strip().lower() not in ("нет", "no", "0", "false"),
         email_delay_min=_int(get("EMAIL_DELAY_MIN"), 60),
         email_delay_max=_int(get("EMAIL_DELAY_MAX"), 150),
         min_members=_int(get("MIN_MEMBERS"), 30),

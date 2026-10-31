@@ -19,6 +19,10 @@ STATIC = Path(__file__).resolve().parent / "static"
 EDITABLE_TEMPLATES = {"email": "email.txt", "vk": "vk.txt"}
 
 
+def has_vk(lead) -> bool:
+    return bool(lead.get("screen_name") or lead.get("vk_group_id"))
+
+
 class App:
     def __init__(self, cfg, store, vk_finder, osm_finder, drafter, sender_factory, mail_check=None,
                  check_alive=site_is_alive):
@@ -80,6 +84,7 @@ class App:
             "settings": {
                 "vk": self.vk_finder.can_search,
                 "vk_messages": bool(self.vk_messages),
+                "only_vk": self.cfg.only_vk,
                 "email": self.cfg.email_ready(),
                 "email_user": self.cfg.smtp_user,
                 "city": self.cfg.default_city,
@@ -126,10 +131,16 @@ class App:
                 else:
                     leads, stats = self.osm_finder.search(
                         query, city, want, skip_uids=self.store.known_uids())
+                no_vk = 0
+                if self.cfg.only_vk:
+                    no_vk = sum(1 for l in leads if not has_vk(l))
+                    leads = [l for l in leads if has_vk(l)]
                 added = [l for l in leads if self.store.add_lead(l)]
                 with_email = sum(1 for l in added if l.get("email"))
-                self.notify(f"✅ {name}: проверено {stats['checked']}, с сайтом {stats['with_site']}, "
-                            f"новых без сайта {len(added)} (с почтой {with_email})")
+                msg = (f"✅ {name}: проверено {stats['checked']}, с сайтом {stats['with_site']}, "
+                       f"новых без сайта {len(added)}")
+                msg += f", без ВК пропущено {no_vk}" if self.cfg.only_vk else f" (с почтой {with_email})"
+                self.notify(msg)
             except (ValueError, ConnectionError) as exc:
                 self.notify(f"⚠️ {name}: {exc}")
             except VKError as exc:
@@ -164,6 +175,10 @@ class App:
 
     def _import(self, leads, stats):
         try:
+            no_vk = 0
+            if self.cfg.only_vk:   # нужны только организации с группой ВК
+                no_vk = sum(1 for l in leads if not has_vk(l))
+                leads = [l for l in leads if has_vk(l)]
             from concurrent.futures import ThreadPoolExecutor
             result, with_site, dead = [], stats["with_site"], 0
             to_check = [l for l in leads if l.get("_sites")]
@@ -190,7 +205,8 @@ class App:
             with_email = sum(1 for l in added if l.get("email"))
             hidden = stats.get("hidden", 0)
             msg = (f"📄 Файл: строк {stats['rows'] - hidden}, с сайтом {with_site + st['with_site']}, "
-                   f"новых без сайта {len(added)} (с почтой {with_email})")
+                   f"новых без сайта {len(added)}")
+            msg += f", без ВК пропущено {no_vk}" if self.cfg.only_vk else f" (с почтой {with_email})"
             if dupes:
                 msg += f", уже были в базе {dupes}"
             if dead:
@@ -225,7 +241,8 @@ class App:
             if not r:
                 continue
             if action == "approve" and r["status"] in ("new", "failed"):
-                self.store.set_status(r["id"], "approved" if r["email"] else "manual")
+                to_mail = r["email"] and not (self.cfg.only_vk and (r["vk_group_id"] or r["screen_name"]))
+                self.store.set_status(r["id"], "approved" if to_mail else "manual")
             elif action == "manual" and r["status"] in ("new", "approved", "failed"):
                 self.store.set_status(r["id"], "manual")
             elif action == "skip" and r["status"] in ("new", "approved", "manual", "failed"):
@@ -234,10 +251,29 @@ class App:
                 self.store.set_status(r["id"], "contacted")
             elif action == "restore" and r["status"] in ("skipped", "failed"):
                 self.store.set_status(r["id"], "new")
+            elif action == "undo_contacted" and r["status"] == "contacted":
+                self.store.set_status(r["id"], "manual")
+                with self.store.lock:   # убираем отметку из счётчика «сегодня во ВК»
+                    self.store.conn.execute(
+                        "DELETE FROM send_log WHERE id = (SELECT MAX(id) FROM send_log WHERE lead_id=? AND email LIKE 'vk:%')",
+                        (r["id"],))
+                    self.store.conn.commit()
             else:
                 continue
             done += 1
         return {"ok": True, "done": done}
+
+    def vk_opened(self, lead_id):
+        """Нажата «Скопировать и открыть диалог»: организация сразу уходит в «Связались»."""
+        r = self.store.get(int(lead_id or 0))
+        if not r or r["status"] not in ("manual", "new", "approved", "failed"):
+            return {"error": "Эта организация уже обработана"}
+        if self.store.vk_sent_today() >= self.cfg.vk_daily_limit:
+            return {"error": f"Дневной лимит во ВК ({self.cfg.vk_daily_limit}) исчерпан. "
+                             f"Его можно поднять в настройках (VK_DAILY_LIMIT)"}
+        self.store.set_status(r["id"], "contacted", "написали во ВК")
+        self.store.log_send(r["id"], f"vk:{r['vk_group_id'] or r['screen_name']}", True)
+        return {"ok": True, "sent_today": self.store.vk_sent_today()}
 
     # ---------- отправка во ВК: одна кнопка на одно сообщение ----------
     def send_vk(self, lead_id, text, captcha_sid=None, captcha_key=None):
@@ -436,6 +472,8 @@ def make_handler(app: App):
                     except ValueError:
                         return self._json({"error": "Файл повреждён"}, 400)
                     res = app.import_file(data.get("filename", ""), raw, data.get("source", "file"))
+                elif path == "/api/vk_opened":
+                    res = app.vk_opened(data.get("id"))
                 elif path == "/api/send_vk":
                     res = app.send_vk(data.get("id"), data.get("text"), data.get("captcha_sid"),
                                       data.get("captcha_key"))

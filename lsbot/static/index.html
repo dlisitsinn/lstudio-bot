@@ -121,9 +121,11 @@ textarea{width:100%;min-height:300px;border:1px solid var(--line);border-radius:
 .dot.ok{background:var(--ok)}.dot.warn{background:#D99A2B}.dot.err{background:var(--err)}
 .field{display:flex;gap:8px;margin:8px 0 22px;max-width:560px}
 .field input{flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--panel)}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;max-width:90vw;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast{position:fixed;right:20px;top:20px;max-width:min(460px,calc(100vw - 32px));background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;max-width:90vw;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.show{opacity:1}
 .toast.err{background:var(--err)}
+.toast.act{pointer-events:auto}
+.toast .undo{margin-left:12px;background:none;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:6px;padding:3px 10px;cursor:pointer;font:inherit;font-size:13px}
 .foot{margin-top:28px;font-size:12px;color:var(--muted)}
 
 @media (max-width:1100px){.layout{grid-template-columns:1fr}.detail{position:static;max-height:none}}
@@ -208,9 +210,14 @@ async function api(path, body){
   if (data.error) toast(data.error, true);
   return data;
 }
-function toast(text, err){
-  const t = $("#toast"); t.textContent = text; t.className = "toast show" + (err ? " err" : "");
-  clearTimeout(t._h); t._h = setTimeout(() => t.className = "toast", err ? 6000 : 3000);
+function toast(text, err, undo){
+  const t = $("#toast"); t.textContent = text; t.className = "toast show" + (err ? " err" : "") + (undo ? " act" : "");
+  if (undo){
+    const b = document.createElement("button"); b.className = "undo"; b.textContent = "Отменить";
+    b.onclick = async () => { t.className = "toast"; await undo(); };
+    t.appendChild(b);
+  }
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = "toast", err ? 6000 : undo ? 7000 : 3000);
 }
 
 async function refresh(){
@@ -309,10 +316,10 @@ function renderTab(){
   } else if (tab === "manual"){
     const Q = S.manual_queue, total = S.counts.manual || 0, auto = S.settings.vk_messages;
     const left = Math.max(0, S.vk_daily_limit - S.vk_sent_today);
-    v.innerHTML = `<h1>Написать во ВК и мессенджеры</h1>
+    v.innerHTML = `<h1>${S.settings.only_vk ? "Написать во ВК" : "Написать во ВК и мессенджеры"}</h1>
       <p class="sub">${auto
         ? "Прочитайте карточку и, если подходит, нажмите «Отправить во ВК» — сообщение уйдёт сразу. Текст можно поправить прямо в карточке."
-        : "Нажмите синюю кнопку: текст скопируется, а диалог откроется в новой вкладке. Там Ctrl+V и Enter, затем «Написала». Чтобы отправлять одной кнопкой, добавьте токен ВК с доступом к сообщениям (см. «Настройки»)."}</p>
+        : "Нажмите синюю кнопку: текст скопируется, диалог ВК откроется в новой вкладке, а организация сама перейдёт в «Связались». В диалоге — Ctrl+V и Enter, вернитесь сюда: следующая карточка уже на месте. Нажали случайно — «Отменить» во всплывающей подсказке."}</p>
       <div class="sendbox">
         <div class="meter">Сегодня во ВК: ${S.vk_sent_today} из ${S.vk_daily_limit}<div class="track"><div class="fill" style="width:${Math.min(100,S.vk_sent_today/S.vk_daily_limit*100)}%"></div></div></div>
         <span class="hint">В очереди ${total}. Лимит — строка VK_DAILY_LIMIT в настройках.</span>
@@ -342,14 +349,14 @@ function cardHTML(l, auto, left){
     ${l.info ? `<p class="info">${esc(l.info)}</p>` : ""}
     <div class="links">
       ${hasVk ? `<a class="btn small" href="${esc(l.vk_link)}" target="_blank" rel="noopener">Посмотреть группу ВК</a>` : ""}
-      ${l.phone ? `<a class="btn small" href="tel:${esc(l.phone)}">${esc(l.phone)}</a>` : ""}
+      ${l.phone && !S.settings.only_vk ? `<a class="btn small" href="tel:${esc(l.phone)}">${esc(l.phone)}</a>` : ""}
       ${closed ? '<span class="tag warn">сообщения в группе закрыты</span>' : ""}
     </div>
     <textarea class="msg" data-text="${l.id}" rows="7" aria-label="Текст сообщения">${esc(draftCache[l.id])}</textarea>
     <div class="captcha" id="cap${l.id}" hidden></div>
     <div class="actions">${vkBtn}
-      ${l.phone && wa.length >= 11 ? `<button class="btn ${hasVk && !closed ? "" : "primary"}" data-wa="${l.id}" data-phone="${wa}">WhatsApp с этим текстом</button>` : ""}
-      <button class="btn small" data-act="contacted" data-id="${l.id}">Уже написала сама</button>
+      ${l.phone && wa.length >= 11 && !S.settings.only_vk ? `<button class="btn ${hasVk && !closed ? "" : "primary"}" data-wa="${l.id}" data-phone="${wa}">WhatsApp с этим текстом</button>` : ""}
+      ${S.settings.only_vk ? "" : `<button class="btn small" data-act="contacted" data-id="${l.id}">Уже написала сама</button>`}
       <button class="btn small" data-act="skip" data-id="${l.id}">Не писать</button></div></div>`;
 }
 const draftCache = {};
@@ -390,9 +397,17 @@ document.addEventListener("click", async e => {
     const id = +(d.dataset.dialog || d.dataset.wa);
     const text = draftCache[id] || (await api("/api/lead?id="+id)).vk_text;
     if (d.dataset.wa){ window.open("https://wa.me/" + d.dataset.phone + "?text=" + encodeURIComponent(text), "_blank", "noopener"); return; }
-    try { await navigator.clipboard.writeText(text); toast("Текст скопирован — в диалоге нажмите Ctrl+V и Enter"); }
-    catch { toast("Не удалось скопировать, выделите текст вручную", true); }
-    window.open(d.dataset.url, "_blank", "noopener"); return;
+    let copied = true;
+    try { await navigator.clipboard.writeText(text); } catch { copied = false; }
+    window.open(d.dataset.url, "_blank", "noopener");
+    const r = await api("/api/vk_opened", {id});
+    if (r.ok){
+      const name = (S.manual_queue.find(l => l.id === id) || {}).name || "";
+      toast((copied ? "Текст скопирован — в диалоге Ctrl+V и Enter. " : "Скопируйте текст вручную. ") + `«${name}» → «Связались»`, false,
+        async () => { await api("/api/action", {action: "undo_contacted", ids: [id]}); manualSig = ""; refresh(); });
+      delete draftCache[id]; manualSig = ""; refresh();
+    }
+    return;
   }
   const t = e.target.closest("[data-tab],[data-check],[data-open],[data-act],[data-bulk],[data-copy],[data-save],#selAll,#sendBtn,#stopBtn");
   if (!t) return;

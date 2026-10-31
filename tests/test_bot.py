@@ -23,7 +23,7 @@ def cfg(**kw):
         smtp_host="smtp.test", smtp_port=465, smtp_user="studio@test.ru", smtp_password="pw",
         sender_name="Анастасия, LStudio", daily_email_limit=3, email_delay_min=0, email_delay_max=0,
         min_members=10, default_city="Челябинск", portfolio_url="https://dlisitsinn.github.io/",
-        studio_vk_url="https://vk.ru/lssttudio", db_path=Path(":memory:"),
+        studio_vk_url="https://vk.ru/lssttudio", db_path=Path(":memory:"), only_vk=False,
     )
     base.update(kw)
     return Config(**base)
@@ -813,3 +813,31 @@ def test_user_templates_override(tmp_path, monkeypatch):
     lead = store.by_status("new")[0]
     assert d.vk(lead).strip() == "Привет, Ноготок!"
     assert "Здравствуйте" in d.email(lead)[1]          # письмо — стандартное
+
+
+# ---------- режим «только ВК» ----------
+def test_only_vk_import_and_approve():
+    app, store = make_import_app()
+    app.cfg.only_vk = True
+    app.import_file("export.csv", CSV_2GIS.encode(), "2gis")
+    app.search_thread.join(5)
+    names = {l["name"] for l in app.state()["leads"]["new"]}
+    assert names == {"Лаванда"}                                  # Ноготок и Цветы — без ВК, пропущены
+    assert "без ВК пропущено 3" in app.state()["log"][0]["text"]
+    lav = app.state()["leads"]["new"][0]
+    assert lav["email"]                                          # почта есть, но…
+    app.action("approve", [lav["id"]])
+    assert store.get(lav["id"])["status"] == "manual"            # …идёт во вкладку ВК, не в письма
+
+
+def test_vk_opened_marks_contacted_and_undo():
+    app, store, ids = vk_app(limit=2)
+    r = app.vk_opened(ids[0])
+    assert r == {"ok": True, "sent_today": 1}
+    assert store.get(ids[0])["status"] == "contacted"
+    assert [l["id"] for l in app.state()["manual_queue"]] == ids[1:]   # следующая карточка сразу на месте
+    assert "уже обработана" in app.vk_opened(ids[0])["error"]
+    app.action("undo_contacted", [ids[0]])                              # «Отменить»
+    assert store.get(ids[0])["status"] == "manual" and store.vk_sent_today() == 0
+    app.vk_opened(ids[0]); app.vk_opened(ids[1])
+    assert "лимит" in app.vk_opened(ids[2])["error"]
