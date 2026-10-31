@@ -37,6 +37,8 @@ class App:
         self.sender = sender_factory(self.notify)
         self.search_thread = None
         self.search_label = ""
+        vf = Path(__file__).resolve().parent.parent / "data" / ".version"
+        self.version = vf.read_text().strip()[:7] if vf.exists() else "локальная"
         self.vk_messages = None       # есть ли у токена доступ к сообщениям (None — ещё не проверяли)
         self._vk_lock = threading.Lock()
         self._vk_last_send = 0.0
@@ -94,6 +96,7 @@ class App:
             "searching": bool(self.search_thread and self.search_thread.is_alive()),
             "search_label": self.search_label,
             "log": list(self.log)[::-1],
+            "version": self.version,
             "settings": {
                 "vk": self.vk_finder.can_search,
                 "vk_messages": bool(self.vk_messages),
@@ -427,6 +430,7 @@ def make_handler(app: App):
                     body = (STATIC / "index.html").read_bytes()
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)

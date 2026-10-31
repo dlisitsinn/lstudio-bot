@@ -144,7 +144,7 @@ textarea{width:100%;min-height:300px;border:1px solid var(--line);border-radius:
 <body>
 <div class="app">
   <aside>
-    <div class="brand">LStudio<small>поиск клиентов без сайта</small></div>
+    <div class="brand">LStudio<small>поиск клиентов без сайта</small><small id="ver"></small></div>
     <nav id="nav"></nav>
     <div class="log"><h3>Что происходит</h3><div id="log"></div></div>
   </aside>
@@ -224,6 +224,7 @@ async function refresh(){
   try { S = await (await fetch("/api/state")).json(); }
   catch(e){ $("#log").innerHTML = "<p>Нет связи с ботом. Запустите его снова.</p>"; return; }
   renderNav(); renderLog(); renderFinder();
+  $("#ver").textContent = "версия " + S.version;
   if (tab === "manual"){
     const sig = S.manual_queue.map(l => l.id + ":" + (l.note||"")).join(",") + "|" + S.vk_sent_today + "|" + S.settings.vk_messages + "|" + (S.counts.manual||0);
     if (sig === manualSig) return;
