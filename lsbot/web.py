@@ -89,7 +89,7 @@ class App:
             if status in ("sent", "contacted", "skipped"):
                 leads[status] = leads[status][::-1][:200]
         manual_queue = []
-        for r in self.store.by_status("manual", limit=10):
+        for r in self.store.by_status("manual", limit=100):
             d = row_to_dict(r)
             d["vk_text"] = self.drafter.vk(r)
             manual_queue.append(d)
