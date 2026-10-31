@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LStudio — поиск клиентов</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F1F0F6; --panel:#FFFFFF; --ink:#1E1B2E; --muted:#6B6782; --line:#DEDBE8;
+  --accent:#4B3FD6; --accent-soft:#E9E7FB; --ok:#1F8A5B; --ok-soft:#E3F3EB;
+  --warn:#A8660F; --warn-soft:#FBF0DF; --err:#B4323A; --err-soft:#F9E4E5;
+  --r:10px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 "Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent)}
+a.btn{text-decoration:none;display:inline-block}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{display:grid;grid-template-columns:240px 1fr;min-height:100vh}
+aside{border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;gap:18px;background:#F7F6FB}
+.brand{font-weight:700;font-size:19px;padding:0 10px;letter-spacing:-.01em}
+.brand small{display:block;font-weight:400;font-size:13px;color:var(--muted);letter-spacing:0}
+nav{display:flex;flex-direction:column;gap:2px}
+nav button{display:flex;gap:8px;justify-content:space-between;align-items:center;border:0;background:none;padding:9px 10px;border-radius:8px;cursor:pointer;text-align:left}
+nav button:hover{background:#ECEAF4}
+nav button.on{background:var(--ink);color:#fff}
+nav .n{font-variant-numeric:tabular-nums;font-size:13px;opacity:.75}
+nav .sep{height:1px;background:var(--line);margin:8px 10px}
+.log{margin-top:auto;font-size:13px;color:var(--muted);max-height:38vh;overflow:auto;padding:0 10px}
+.log h3{font-size:13px;font-weight:600;color:var(--ink);margin:0 0 6px}
+.log p{margin:0 0 7px}
+.log time{color:var(--ink);font-variant-numeric:tabular-nums;margin-right:6px}
+
+main{padding:26px 32px 60px;min-width:0}
+.finder{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 24px 18px;margin-bottom:24px}
+.modes{display:flex;gap:4px;margin:0 0 14px -8px}
+.mode{border:0;background:none;padding:6px 10px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:500}
+.mode:hover{color:var(--ink)}
+.mode.on{color:var(--ink);background:#ECEAF4}
+.drop{display:flex;flex-direction:column;gap:4px;border:2px dashed var(--line);border-radius:12px;padding:22px 20px;cursor:pointer;text-align:center}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop-title{font-size:18px;font-weight:600}
+.drop.has .drop-title{color:var(--accent)}
+.sentence{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 12px;font-size:26px;font-weight:600;letter-spacing:-.015em}
+.sentence input,.sentence select{border:0;border-bottom:2px solid var(--line);background:none;padding:2px 2px 4px;font-weight:600;font-size:26px;letter-spacing:-.015em}
+.sentence input:focus,.sentence select:focus{outline:none;border-color:var(--accent)}
+.sentence #q{width:280px}.sentence #city{width:200px}.sentence #want{width:64px;text-align:center}
+.finder-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-top:16px}
+.src{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.src label{padding:7px 12px;cursor:pointer;font-size:14px}
+.src input{position:absolute;opacity:0;pointer-events:none}
+.src label:has(input:checked){background:var(--accent-soft);color:var(--accent);font-weight:600}
+.src label:has(input:disabled){color:#AAA6BC;cursor:not-allowed}
+.hint{font-size:13px;color:var(--muted)}
+
+.btn{border:1px solid var(--line);background:var(--panel);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:#C6C2D8}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#3E33BD}
+.btn.good{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.small{padding:5px 10px;font-size:13px}
+
+h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 16px;max-width:70ch}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.bar .grow{flex:1}
+
+.list{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.row{display:grid;grid-template-columns:34px 1fr auto;gap:10px;align-items:center;padding:11px 14px;border-top:1px solid var(--line);cursor:pointer}
+.row:first-child{border-top:0}
+.row:hover{background:#FAFAFD}
+.row.sel{background:var(--accent-soft)}
+.row input[type=checkbox]{width:17px;height:17px;accent-color:var(--accent)}
+.row .name{font-weight:600}
+.row .meta{font-size:13px;color:var(--muted);margin-top:1px}
+.tags{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.tag{font-size:12px;padding:2px 8px;border-radius:20px;background:#EFEDF5;color:var(--muted);white-space:nowrap}
+.tag.mail{background:var(--ok-soft);color:var(--ok)}
+.tag.warn{background:var(--warn-soft);color:var(--warn)}
+.tag.err{background:var(--err-soft);color:var(--err)}
+.empty{padding:40px 20px;text-align:center;color:var(--muted)}
+.empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:20px;align-items:start}
+.detail{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;position:sticky;top:20px;max-height:calc(100vh - 40px);overflow:auto}
+.detail h2{font-size:18px;margin:0 0 10px}
+.facts{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:14px;margin-bottom:14px}
+.facts dt{color:var(--muted)}.facts dd{margin:0;word-break:break-word}
+.draft{background:#F7F6FB;border:1px solid var(--line);border-radius:8px;padding:12px 14px;white-space:pre-wrap;font-size:14px}
+.draft strong{display:block;margin-bottom:8px}
+.detail .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+
+.cards{display:grid;gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}
+.card .top{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.card .links{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.card .draft{margin-top:6px}
+.card .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center}
+.info{white-space:pre-line;font-size:14px;color:var(--muted);margin:8px 0 0;max-width:80ch}
+textarea.msg{min-height:0;margin-top:4px;font-size:14px;background:#F7F6FB}
+.captcha{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;padding:10px 12px;border:1px solid var(--warn);background:var(--warn-soft);border-radius:8px}
+.captcha[hidden]{display:none}
+.captcha p{flex-basis:100%}
+.capin{border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:130px}
+
+.sendbox{display:flex;flex-wrap:wrap;gap:16px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;margin-bottom:14px}
+.meter{flex:1;min-width:200px}
+.meter .track{height:8px;background:#ECEAF4;border-radius:8px;overflow:hidden;margin-top:6px}
+.meter .fill{height:100%;background:var(--ok)}
+
+textarea{width:100%;min-height:300px;border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--panel);resize:vertical;font-size:14px;line-height:1.5}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.checks p{margin:6px 0}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;vertical-align:1px}
+.dot.ok{background:var(--ok)}.dot.warn{background:#D99A2B}.dot.err{background:var(--err)}
+.field{display:flex;gap:8px;margin:8px 0 22px;max-width:560px}
+.field input{flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--panel)}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;max-width:90vw;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+.toast.err{background:var(--err)}
+.foot{margin-top:28px;font-size:12px;color:var(--muted)}
+
+@media (max-width:1100px){.layout{grid-template-columns:1fr}.detail{position:static;max-height:none}}
+@media (max-width:760px){
+  .app{grid-template-columns:1fr}
+  aside{border-right:0;border-bottom:1px solid var(--line)}
+  nav{flex-direction:row;flex-wrap:wrap}.log{display:none}
+  main{padding:18px 16px 50px}
+  .sentence,.sentence input,.sentence select{font-size:20px}
+  .sentence #q,.sentence #city{width:100%}
+  .two{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">LStudio<small>поиск клиентов без сайта</small></div>
+    <nav id="nav"></nav>
+    <div class="log"><h3>Что происходит</h3><div id="log"></div></div>
+  </aside>
+  <main>
+    <div class="finder">
+      <div class="modes" role="tablist" aria-label="Как добавить организации">
+        <button type="button" class="mode on" data-mode="search" role="tab" aria-selected="true">Найти</button>
+        <button type="button" class="mode" data-mode="file" role="tab" aria-selected="false">Загрузить таблицу</button>
+      </div>
+      <form id="finder">
+        <div class="sentence">
+          Найти <input id="q" placeholder="маникюр" autocomplete="off" aria-label="Что искать">
+          в городе <input id="city" placeholder="Челябинск" aria-label="Город">
+          до <input id="want" type="number" min="1" max="100" value="20" aria-label="Сколько"> без сайта
+        </div>
+        <div class="finder-row">
+          <div class="src" role="radiogroup" aria-label="Где искать">
+            <label><input type="radio" name="src" value="both" checked>ВК и карта</label>
+            <label><input type="radio" name="src" value="vk">Только ВК</label>
+            <label><input type="radio" name="src" value="osm">Только карта</label>
+          </div>
+          <button class="btn primary" id="findBtn" type="submit">Найти</button>
+          <span class="hint" id="findHint"></span>
+        </div>
+      </form>
+      <form id="importer" hidden>
+        <label class="drop" id="drop">
+          <input type="file" id="file" accept=".xlsx,.csv,.txt" hidden>
+          <span class="drop-title" id="dropTitle">Перетащите сюда таблицу или нажмите, чтобы выбрать</span>
+          <span class="hint">Excel (.xlsx) или CSV. Первая строка — заголовки: Название, Телефон, Почта, Сайт, ВКонтакте, Адрес, Рубрика. Лишние колонки не мешают.</span>
+        </label>
+        <div class="finder-row">
+          <div class="src" role="radiogroup" aria-label="Откуда данные">
+            <label><input type="radio" name="fsrc" value="2gis" checked>Из 2ГИС</label>
+            <label><input type="radio" name="fsrc" value="yandex">Из Яндекс Карт</label>
+            <label><input type="radio" name="fsrc" value="file">Другое</label>
+          </div>
+          <button class="btn primary" id="importBtn" type="submit" disabled>Загрузить</button>
+          <a class="btn" href="/api/template.csv">Скачать шаблон таблицы</a>
+        </div>
+      </form>
+    </div>
+    <section id="view"></section>
+    <p class="foot">Данные карты © участники OpenStreetMap (ODbL). Окно работает только на этом компьютере.</p>
+  </main>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+const TABS = [
+  ["new","Новые"],["approved","Письма"],["manual","Написать во ВК"],
+  ["sent","Отправлено"],["contacted","Связались"],["skipped","Пропущенные"],
+  ["-"],["templates","Тексты"],["settings","Настройки"]
+];
+let S = null, tab = "new", selected = new Set(), openId = null, openLead = null, tplLoaded = false;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(path, body){
+  const opt = body === undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json","X-LS":"1"}, body:JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const data = await r.json().catch(() => ({error:"Нет ответа от бота. Окно бота закрыто?"}));
+  if (data.error) toast(data.error, true);
+  return data;
+}
+function toast(text, err){
+  const t = $("#toast"); t.textContent = text; t.className = "toast show" + (err ? " err" : "");
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = "toast", err ? 6000 : 3000);
+}
+
+async function refresh(){
+  try { S = await (await fetch("/api/state")).json(); }
+  catch(e){ $("#log").innerHTML = "<p>Нет связи с ботом. Запустите его снова.</p>"; return; }
+  renderNav(); renderLog(); renderFinder();
+  if (tab === "manual"){
+    const sig = S.manual_queue.map(l => l.id + ":" + (l.note||"")).join(",") + "|" + S.vk_sent_today + "|" + S.settings.vk_messages + "|" + (S.counts.manual||0);
+    if (sig === manualSig) return;
+    manualSig = sig;
+  }
+  if (!["templates","settings"].includes(tab)) renderTab();
+}
+let manualSig = "";
+
+function renderNav(){
+  $("#nav").innerHTML = TABS.map(([k,label]) => k === "-" ? '<div class="sep"></div>' :
+    `<button class="${k===tab?"on":""}" data-tab="${k}"><span>${label}</span><span class="n">${S.counts[k] || (k==="templates"||k==="settings" ? "" : 0)}</span></button>`).join("");
+}
+function renderLog(){
+  $("#log").innerHTML = S.log.length ? S.log.map(l => `<p><time>${l.t}</time>${esc(l.text)}</p>`).join("")
+    : "<p>Пока тихо. Начните с поиска сверху.</p>";
+}
+function renderFinder(){
+  const city = $("#city"); if (!city.value && S.settings.city && document.activeElement !== city) city.placeholder = S.settings.city;
+  const vkOff = !S.settings.vk;
+  document.querySelectorAll('input[name=src]').forEach(r => {
+    if (r.value === "vk") r.disabled = vkOff;
+    if (vkOff && r.value === "both" && r.checked) {/* оставляем: бот сам поищет по карте */}
+  });
+  $("#findBtn").disabled = S.searching;
+  $("#importBtn").disabled = S.searching || !pickedFile;
+  $("#findHint").textContent = S.searching ? (S.search_label.startsWith("файл") ? `Обрабатываю ${S.search_label}…` : `Ищу ${S.search_label}… обычно 1–3 минуты`)
+    : vkOff ? "Токена ВК нет, поэтому ищу только по карте. Как добавить токен — в «Настройках»." : "";
+}
+
+function leadMeta(l){
+  const parts = [l.activity, l.address || l.city, l.members ? l.members + " подписчиков" : "", l.source_name].filter(Boolean);
+  return parts.join(", ");
+}
+function leadTags(l){
+  let t = l.email ? '<span class="tag mail">почта</span>' : (l.vk_link ? '<span class="tag">только ВК</span>' : (l.phone ? '<span class="tag">телефон</span>' : ''));
+  if (l.note && l.note.includes("не открывается")) t += '<span class="tag warn">сайт не открывается</span>';
+  if (l.status === "failed") t += '<span class="tag err">ошибка</span>';
+  return t;
+}
+
+function listHTML(items, withCheck=true){
+  if (!items.length) return "";
+  return '<div class="list">' + items.map(l => `
+    <div class="row ${selected.has(l.id)?"sel":""} ${openId===l.id?"sel":""}" data-open="${l.id}">
+      ${withCheck ? `<input type="checkbox" data-check="${l.id}" ${selected.has(l.id)?"checked":""} aria-label="Выбрать">` : "<span></span>"}
+      <div><div class="name">${esc(l.name)}</div><div class="meta">${esc(leadMeta(l))}</div></div>
+      <div class="tags">${leadTags(l)}</div>
+    </div>`).join("") + "</div>";
+}
+
+function detailHTML(){
+  if (!openLead) return '<div class="detail"><p class="hint">Нажмите на организацию, чтобы увидеть контакты и готовый текст.</p></div>';
+  const l = openLead;
+  const facts = [["Сфера",l.activity],["Адрес",l.address||l.city],["Почта",l.email],["Телефон",l.phone],
+    ["ВКонтакте", l.vk_link ? `<a href="${esc(l.vk_link)}" target="_blank" rel="noopener">${esc(l.vk_link.replace("https://",""))}</a>` : ""],
+    ["Ещё",l.other_links],["Источник",l.source_name],["Заметка",l.note],["Статус",l.status_name]]
+    .filter(f => f[1]).map(([k,v]) => `<dt>${k}</dt><dd>${k==="ВКонтакте"?v:esc(v)}</dd>`).join("");
+  const draft = l.email
+    ? `<div class="draft"><strong>${esc(l.email_subject)}</strong>${esc(l.email_body)}</div>`
+    : `<div class="draft">${esc(l.vk_text)}</div>`;
+  let actions = "";
+  if (["new","failed"].includes(l.status)) actions = `<button class="btn good" data-act="approve" data-id="${l.id}">${l.email?"В очередь писем":"В очередь «Написать во ВК»"}</button><button class="btn" data-act="skip" data-id="${l.id}">Пропустить</button>`;
+  if (l.status === "approved") actions = `<button class="btn" data-act="manual" data-id="${l.id}">Перенести во «Написать во ВК»</button><button class="btn" data-act="skip" data-id="${l.id}">Убрать</button>`;
+  return `<div class="detail"><h2>${esc(l.name)}</h2><dl class="facts">${facts}</dl>
+    <p class="hint" style="margin:0 0 6px">${l.email ? "Письмо, которое уйдёт:" : "Текст для ручной отправки:"}</p>${draft}
+    <div class="actions">${actions}<button class="btn small" data-copy="${l.id}">Скопировать текст</button></div></div>`;
+}
+
+function renderTab(){
+  const v = $("#view"), L = S.leads;
+  if (tab === "new"){
+    const items = L.new.concat(L.failed);
+    v.innerHTML = `<h1>Новые</h1><p class="sub">Отметьте, кому писать, и нажмите «В очередь на отправку». Организации с почтой попадут во вкладку «Письма», без почты — во вкладку «Написать во ВК». Сами сообщения отправляются уже там.</p>
+      ${items.length ? `<div class="bar"><button class="btn" id="selAll">${selected.size===items.length?"Снять выбор":"Выбрать все"}</button>
+        <button class="btn good" data-bulk="approve" ${selected.size?"":"disabled"}>В очередь на отправку${selected.size?" ("+selected.size+")":""}</button>
+        <button class="btn" data-bulk="skip" ${selected.size?"":"disabled"}>Пропустить</button></div>
+        <div class="layout">${listHTML(items)}${detailHTML()}</div>`
+      : `<div class="list"><div class="empty"><b>Новых пока нет</b>Напишите сверху, кого искать, например «кофейня», или загрузите таблицу из 2ГИС либо Яндекс Карт.</div></div>`}`;
+  } else if (tab === "approved"){
+    const n = L.approved.length, left = Math.max(0, S.daily_limit - S.sent_today), now = Math.min(n, left);
+    v.innerHTML = `<h1>Письма</h1><p class="sub">Письма уходят по одному с паузой 1–2 минуты, чтобы почта не посчитала их спамом. Окно бота должно быть открыто, пока идёт отправка.</p>
+      <div class="sendbox">
+        <div class="meter">Сегодня отправлено ${S.sent_today} из ${S.daily_limit}<div class="track"><div class="fill" style="width:${Math.min(100,S.sent_today/S.daily_limit*100)}%"></div></div></div>
+        ${S.sending ? `<button class="btn" id="stopBtn">Остановить</button>`
+          : `<button class="btn primary" id="sendBtn" ${now && S.settings.email ? "" : "disabled"}>${now ? `Отправить ${now} ${plural(now,"письмо","письма","писем")}` : n ? "Лимит на сегодня исчерпан" : "Очередь пуста"}</button>`}
+      </div>
+      ${!S.settings.email ? '<p class="sub">Почта не настроена. Откройте «Настройки».</p>' : ""}
+      ${n ? `<div class="layout">${listHTML(L.approved,false)}${detailHTML()}</div>` : '<div class="list"><div class="empty"><b>В очереди писем пусто</b>Отметьте организации с почтой во вкладке «Новые» и нажмите «В очередь на отправку».</div></div>'}`;
+  } else if (tab === "manual"){
+    const Q = S.manual_queue, total = S.counts.manual || 0, auto = S.settings.vk_messages;
+    const left = Math.max(0, S.vk_daily_limit - S.vk_sent_today);
+    v.innerHTML = `<h1>Написать во ВК и мессенджеры</h1>
+      <p class="sub">${auto
+        ? "Прочитайте карточку и, если подходит, нажмите «Отправить во ВК» — сообщение уйдёт сразу. Текст можно поправить прямо в карточке."
+        : "Нажмите синюю кнопку: текст скопируется, а диалог откроется в новой вкладке. Там Ctrl+V и Enter, затем «Написала». Чтобы отправлять одной кнопкой, добавьте токен ВК с доступом к сообщениям (см. «Настройки»)."}</p>
+      <div class="sendbox">
+        <div class="meter">Сегодня во ВК: ${S.vk_sent_today} из ${S.vk_daily_limit}<div class="track"><div class="fill" style="width:${Math.min(100,S.vk_sent_today/S.vk_daily_limit*100)}%"></div></div></div>
+        <span class="hint">В очереди ${total}. Лимит — строка VK_DAILY_LIMIT в настройках.</span>
+      </div>
+      ${Q.length ? '<div class="cards">' + Q.map(l => cardHTML(l, auto, left)).join("") + "</div>" + (total > Q.length ? `<p class="hint" style="margin-top:12px">Показаны первые ${Q.length} из ${total}. Следующие появятся по мере отправки.</p>` : "")
+        : '<div class="list"><div class="empty"><b>Здесь пусто</b>Отметьте организации во вкладке «Новые» и нажмите «В очередь на отправку» — те, у кого нет почты, появятся здесь.</div></div>'}`;
+  } else {
+    const items = L[tab] || [];
+    const titles = {sent:["Отправлено","Последние письма. Ответы приходят на "+(S.settings.email_user||"вашу почту")+". Если ответили «нет», добавьте адрес в чёрный список в «Настройках»."],
+      contacted:["Связались вручную","Организации, которым вы написали сами."],
+      skipped:["Пропущенные","Можно вернуть в «Новые», если передумали."]};
+    v.innerHTML = `<h1>${titles[tab][0]}</h1><p class="sub">${esc(titles[tab][1])}</p>
+      ${tab==="skipped" && items.length ? `<div class="bar"><button class="btn" data-bulk="restore" ${selected.size?"":"disabled"}>Вернуть в новые</button></div>` : ""}
+      ${items.length ? `<div class="layout">${listHTML(items, tab==="skipped")}${detailHTML()}</div>` : '<div class="list"><div class="empty"><b>Пока пусто</b></div></div>'}`;
+  }
+}
+function cardHTML(l, auto, left){
+  const wa = l.phone ? l.phone.replace(/\D/g,"").replace(/^8/,"7") : "";
+  const hasVk = !!l.vk_link, closed = (l.note||"").includes("сообщения сообщества закрыты");
+  if (!(l.id in draftCache)) draftCache[l.id] = l.vk_text;
+  const vkBtn = !hasVk || closed ? "" : auto
+    ? `<button class="btn primary" data-sendvk="${l.id}" ${left ? "" : "disabled"}>${left ? "Отправить во ВК" : "Лимит на сегодня"}</button>`
+    : `<button class="btn primary" data-dialog="${l.id}" data-url="${esc(l.vk_group_id ? "https://vk.ru/im?sel=-" + l.vk_group_id : "https://vk.me/" + l.screen_name)}">Скопировать и открыть диалог ВК</button>`;
+  return `<div class="card" id="card${l.id}"><div class="top"><div>
+      <div class="name" style="font-weight:600;font-size:16px">${esc(l.name)}</div>
+      <div class="meta hint">${esc(leadMeta(l))}</div></div></div>
+    ${l.info ? `<p class="info">${esc(l.info)}</p>` : ""}
+    <div class="links">
+      ${hasVk ? `<a class="btn small" href="${esc(l.vk_link)}" target="_blank" rel="noopener">Посмотреть группу ВК</a>` : ""}
+      ${l.phone ? `<a class="btn small" href="tel:${esc(l.phone)}">${esc(l.phone)}</a>` : ""}
+      ${closed ? '<span class="tag warn">сообщения в группе закрыты</span>' : ""}
+    </div>
+    <textarea class="msg" data-text="${l.id}" rows="7" aria-label="Текст сообщения">${esc(draftCache[l.id])}</textarea>
+    <div class="captcha" id="cap${l.id}" hidden></div>
+    <div class="actions">${vkBtn}
+      ${l.phone && wa.length >= 11 ? `<button class="btn ${hasVk && !closed ? "" : "primary"}" data-wa="${l.id}" data-phone="${wa}">WhatsApp с этим текстом</button>` : ""}
+      <button class="btn small" data-act="contacted" data-id="${l.id}">Уже написала сама</button>
+      <button class="btn small" data-act="skip" data-id="${l.id}">Не писать</button></div></div>`;
+}
+const draftCache = {};
+async function loadDraft(id){
+  const el = document.getElementById("d"+id);
+  if (draftCache[id]) { if (el) el.textContent = draftCache[id]; return; }
+  const l = await api("/api/lead?id="+id); draftCache[id] = l.vk_text;
+  const el2 = document.getElementById("d"+id); if (el2) el2.textContent = l.vk_text;
+}
+function plural(n,a,b,c){const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&&(h<10||h>=20)?b:c}
+
+async function renderTemplates(){
+  const t = await api("/api/templates");
+  $("#view").innerHTML = `<h1>Тексты</h1><p class="sub">Строки, которые начинаются с «#», — подсказки, в текст они не попадают. В письме первая строка «Тема:» задаёт тему. Подстановки: {name} — название организации, {where} — где нашли (во ВК или на карте), {example} — пример работы из похожей сферы, {portfolio_url}, {studio_vk_url}, {sender_name}.</p>
+    <div class="two"><div><h2 style="font-size:16px">Письмо</h2><textarea id="tEmail">${esc(t.email)}</textarea>
+      <div class="bar" style="margin-top:8px"><button class="btn primary" data-save="email">Сохранить письмо</button></div></div>
+    <div><h2 style="font-size:16px">Сообщение для ВК</h2><textarea id="tVk">${esc(t.vk)}</textarea>
+      <div class="bar" style="margin-top:8px"><button class="btn primary" data-save="vk">Сохранить сообщение</button></div></div></div>`;
+}
+async function renderSettings(){
+  $("#view").innerHTML = `<h1>Настройки</h1><p class="sub">Токены и почта задаются в файле <b>.env</b> в папке бота. После изменения файла перезапустите бота.</p>
+    <div class="card checks" id="checks"><p class="hint">Проверяю…</p></div>
+    <h2 style="font-size:16px;margin-top:26px">Чёрный список</h2>
+    <p class="sub" style="margin-bottom:0">Если организация ответила «нет», внесите её почту, телефон или ссылку на группу, и бот больше никогда ей не напишет.</p>
+    <form class="field" id="blForm"><input id="blValue" placeholder="info@salon.ru или vk.ru/salon"><button class="btn">Добавить</button></form>
+    <h2 style="font-size:16px">Таблица</h2>
+    <p class="sub">Вся база одним файлом для Excel.</p>
+    <a class="btn" href="/api/export.csv">Скачать таблицу</a>`;
+  const c = await api("/api/check", {});
+  $("#checks").innerHTML = (c.lines||[]).map(([k,t]) => `<p><span class="dot ${k}"></span>${esc(t)}</p>`).join("");
+}
+
+document.addEventListener("click", async e => {
+  const sv = e.target.closest("[data-sendvk],[data-capsend]");
+  if (sv){ return sendVk(+(sv.dataset.sendvk || sv.dataset.capsend), sv); }
+  const d = e.target.closest("[data-dialog],[data-wa]");
+  if (d){
+    const id = +(d.dataset.dialog || d.dataset.wa);
+    const text = draftCache[id] || (await api("/api/lead?id="+id)).vk_text;
+    if (d.dataset.wa){ window.open("https://wa.me/" + d.dataset.phone + "?text=" + encodeURIComponent(text), "_blank", "noopener"); return; }
+    try { await navigator.clipboard.writeText(text); toast("Текст скопирован — в диалоге нажмите Ctrl+V и Enter"); }
+    catch { toast("Не удалось скопировать, выделите текст вручную", true); }
+    window.open(d.dataset.url, "_blank", "noopener"); return;
+  }
+  const t = e.target.closest("[data-tab],[data-check],[data-open],[data-act],[data-bulk],[data-copy],[data-save],#selAll,#sendBtn,#stopBtn");
+  if (!t) return;
+  if (t.dataset.tab){ tab = t.dataset.tab; selected.clear(); openId = null; openLead = null;
+    renderNav(); if (tab==="templates") renderTemplates(); else if (tab==="settings") renderSettings(); else renderTab(); return; }
+  if (t.dataset.check){ e.stopPropagation(); const id=+t.dataset.check; selected.has(id)?selected.delete(id):selected.add(id); renderTab(); return; }
+  if (t.dataset.open){ openId = +t.dataset.open; openLead = await api("/api/lead?id="+openId); renderTab(); return; }
+  if (t.dataset.act){ await api("/api/action", {action:t.dataset.act, ids:[+t.dataset.id]}); if (openId===+t.dataset.id){openId=null;openLead=null;}
+    toast({approve:"Добавлено в очередь",skip:"Пропущено",contacted:"Отмечено: написали",manual:"Перенесено в «Написать во ВК»"}[t.dataset.act]||"Готово"); return refresh(); }
+  if (t.dataset.bulk){ const r = await api("/api/action", {action:t.dataset.bulk, ids:[...selected]}); selected.clear(); openId=null; openLead=null;
+    if (t.dataset.bulk === "approve" && r.done){
+      const c = S.counts; const before = {a: c.approved||0, m: c.manual||0};
+      await refresh();
+      const mail = (S.counts.approved||0) - before.a, vk = (S.counts.manual||0) - before.m;
+      return toast(`В очереди: писем +${mail}, во ВК +${vk}. Отправка — во вкладках «Письма» и «Написать во ВК»`);
+    }
+    toast(`Готово: ${r.done}`); return refresh(); }
+  if (t.dataset.copy){ const id=+t.dataset.copy; const l = openLead && openLead.id===id ? openLead : await api("/api/lead?id="+id);
+    const text = l.email && tab!=="manual" ? `${l.email_subject}\n\n${l.email_body}` : l.vk_text;
+    try { await navigator.clipboard.writeText(text); toast("Текст скопирован"); } catch { toast("Не удалось скопировать, выделите текст вручную", true); } return; }
+  if (t.dataset.save){ const text = t.dataset.save==="email" ? $("#tEmail").value : $("#tVk").value;
+    const r = await api("/api/templates", {kind:t.dataset.save, text}); if (r.ok){ toast("Сохранено"); Object.keys(draftCache).forEach(k=>delete draftCache[k]); } return; }
+  if (t.id==="selAll"){ const items = S.leads.new.concat(S.leads.failed); if (selected.size===items.length) selected.clear(); else items.forEach(l=>selected.add(l.id)); renderTab(); return; }
+  if (t.id==="sendBtn"){ const r = await api("/api/send", {}); if (r.message) toast(r.message); return refresh(); }
+  if (t.id==="stopBtn"){ const r = await api("/api/stop", {}); if (r.message) toast(r.message); return refresh(); }
+});
+let pickedFile = null;
+function pickFile(f){
+  if (!f) return;
+  if (f.size > 15 * 1024 * 1024) return toast("Файл больше 15 МБ — разделите его на части", true);
+  pickedFile = f; $("#dropTitle").textContent = f.name; $("#drop").classList.add("has");
+  $("#importBtn").disabled = !!(S && S.searching);
+}
+document.querySelectorAll("[data-mode]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("[data-mode]").forEach(x => { x.classList.toggle("on", x===b); x.setAttribute("aria-selected", x===b); });
+  $("#finder").hidden = b.dataset.mode !== "search"; $("#importer").hidden = b.dataset.mode !== "file";
+}));
+$("#file").addEventListener("change", e => pickFile(e.target.files[0]));
+const drop = $("#drop");
+["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => pickFile(e.dataTransfer.files[0]));
+$("#importer").addEventListener("submit", async e => {
+  e.preventDefault(); if (!pickedFile) return;
+  const buf = new Uint8Array(await pickedFile.arrayBuffer());
+  let bin = ""; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  const r = await api("/api/import", {filename: pickedFile.name, data: btoa(bin),
+    source: document.querySelector('input[name=fsrc]:checked').value});
+  if (r.message){ toast(r.message); pickedFile = null; $("#file").value = ""; $("#dropTitle").textContent = "Перетащите сюда ещё одну таблицу или нажмите, чтобы выбрать"; drop.classList.remove("has"); }
+  refresh();
+});
+document.addEventListener("input", e => {
+  if (e.target.dataset && e.target.dataset.text) draftCache[+e.target.dataset.text] = e.target.value;
+});
+async function sendVk(id, btn){
+  const cap = document.getElementById("cap" + id);
+  const body = {id, text: draftCache[id]};
+  if (btn.dataset.capsend){ body.captcha_sid = cap.dataset.sid; body.captcha_key = cap.querySelector("input").value.trim();
+    if (!body.captcha_key) return toast("Введите символы с картинки", true); }
+  btn.disabled = true; const label = btn.textContent; btn.textContent = "Отправляю…";
+  const r = await api("/api/send_vk", body);
+  btn.disabled = false; btn.textContent = label;
+  if (r.captcha){
+    cap.hidden = false; cap.dataset.sid = r.captcha.sid;
+    cap.innerHTML = `<p class="hint" style="margin:0 0 6px">ВК просит подтвердить, что вы человек. Введите символы с картинки:</p>
+      <img src="${esc(r.captcha.img)}" alt="Капча" width="130" height="50">
+      <input class="capin" autocomplete="off" aria-label="Символы с картинки">
+      <button class="btn primary small" data-capsend="${id}">Отправить с кодом</button>`;
+    cap.querySelector("input").focus();
+    cap.querySelector("input").addEventListener("keydown", ev => { if (ev.key === "Enter") cap.querySelector("[data-capsend]").click(); });
+    return;
+  }
+  if (r.ok){ toast(`Отправлено. Сегодня во ВК: ${r.sent_today}`); delete draftCache[id]; manualSig = ""; refresh(); }
+  else if (r.closed){ manualSig = ""; refresh(); }
+}
+$("#finder").addEventListener("submit", async e => {
+  e.preventDefault();
+  const r = await api("/api/search", {query:$("#q").value, city:$("#city").value || $("#city").placeholder,
+    want:+$("#want").value, source:document.querySelector('input[name=src]:checked').value});
+  if (r.message) toast(r.message);
+  refresh();
+});
+document.addEventListener("submit", async e => {
+  if (e.target.id !== "blForm") return; e.preventDefault();
+  const r = await api("/api/blacklist", {value:$("#blValue").value}); if (r.ok){ toast("Добавлено в чёрный список"); $("#blValue").value=""; refresh(); }
+});
+refresh(); setInterval(() => { if (!document.hidden) refresh(); }, 3000);
+</script>
+</body>
+</html>
