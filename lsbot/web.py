@@ -332,7 +332,7 @@ class App:
         return res
 
     # ---------- отправка отмеченных карточек (не больше 10 за раз) ----------
-    BATCH_MAX = 10
+    BATCH_MAX = 100
 
     def start_vk_batch(self, ids, texts=None):
         if self.batch["running"]:
