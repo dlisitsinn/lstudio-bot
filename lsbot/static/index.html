@@ -326,7 +326,7 @@ function renderTab(){
     const Q = S.manual_queue, total = S.counts.manual || 0, auto = S.settings.vk_messages;
     const left = Math.max(0, S.vk_daily_limit - S.vk_sent_today);
     v.innerHTML = `<h1>${S.settings.only_vk ? "Написать во ВК" : "Написать во ВК и мессенджеры"}</h1>
-      <p class="sub">${S.vkb.state === "ready" ? "Просмотрите карточки и отметьте галочкой, кому писать (или «Выбрать первые 10»), затем «Отправить выбранные» — бот отправит их по очереди с небольшими паузами, а сообщества с закрытыми сообщениями пропустит сам. Текст можно поправить прямо в карточке." : auto
+      <p class="sub">${S.vkb.state === "ready" ? "Просмотрите карточки и отметьте галочкой, кому писать (или «Выбрать первые 100»), затем «Отправить выбранные» — бот отправит их по очереди с небольшими паузами, а сообщества с закрытыми сообщениями пропустит сам. Текст можно поправить прямо в карточке." : auto
         ? "Прочитайте карточку и, если подходит, нажмите «Отправить во ВК» — сообщение уйдёт сразу. Текст можно поправить прямо в карточке."
         : "Нажмите синюю кнопку: текст скопируется, диалог ВК откроется в новой вкладке, а организация сама перейдёт в «Связались». В диалоге — Ctrl+V и Enter, вернитесь сюда: следующая карточка уже на месте. Нажали случайно — «Отменить» во всплывающей подсказке."}</p>
       ${vkbPanel()}
@@ -356,7 +356,7 @@ function vkbPanel(){
       ${B.captcha ? '<button class="btn primary" id="batchGo">Продолжить</button>' : ""}
       <button class="btn" id="batchStop">Стоп</button></div>`;
   if (st === "ready") return `<div class="vkb ready"><b>Отправка включена.</b>
-      <button class="btn small" id="sel10">${vkSel.size ? "Снять выбор" : "Выбрать первые 10"}</button>
+      <button class="btn small" id="sel10">${vkSel.size ? "Снять выбор" : "Выбрать первые 100"}</button>
       <button class="btn primary small" id="sendSel" ${vkSel.size ? "" : "disabled"}>Отправить выбранные${vkSel.size ? " (" + vkSel.size + ")" : ""}</button>
       <span class="hint">или по одной: <span class="key">Пробел</span> — отправить первую, <span class="key">S</span> — пропустить. Закрытые сообщения пропускаются сами.</span></div>`;
   if (st === "installing" || st === "starting") return `<div class="vkb">${msg}</div>`;
@@ -426,7 +426,7 @@ document.addEventListener("click", async e => {
   if (pk){ const id = +pk.dataset.pick; pk.checked ? vkSel.add(id) : vkSel.delete(id); manualSig = ""; renderTab(); return; }
   if (e.target.closest("#sel10")){
     if (vkSel.size) vkSel.clear();
-    else S.manual_queue.filter(l => (l.vk_link) && !(l.note||"").includes("закрыты")).slice(0, 10).forEach(l => vkSel.add(l.id));
+    else S.manual_queue.filter(l => (l.vk_link) && !(l.note||"").includes("закрыты")).slice(0, 100).forEach(l => vkSel.add(l.id));
     manualSig = ""; renderTab(); return; }
   if (e.target.closest("#sendSel")){
     const ids = [...vkSel], texts = {}; ids.forEach(id => { if (draftCache[id]) texts[id] = draftCache[id]; });
