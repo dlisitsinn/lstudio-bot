@@ -25,7 +25,7 @@ def has_vk(lead) -> bool:
 
 class App:
     def __init__(self, cfg, store, vk_finder, osm_finder, drafter, sender_factory, mail_check=None,
-                 check_alive=site_is_alive):
+                 check_alive=site_is_alive, vkb=None):
         self.check_alive = check_alive
         self.cfg = cfg
         self.store = store
@@ -43,6 +43,10 @@ class App:
         self._vk_lock = threading.Lock()
         self._vk_last_send = 0.0
         self._sleep = time.sleep
+        if vkb is None:
+            from .vkbrowser import VKBrowser
+            vkb = VKBrowser(Path(__file__).resolve().parent.parent / "data" / "vk-browser", notify=self.notify)
+        self.vkb = vkb
         if cfg.only_vk:
             self._hide_without_vk()
 
@@ -97,6 +101,7 @@ class App:
             "search_label": self.search_label,
             "log": list(self.log)[::-1],
             "version": self.version,
+            "vkb": self.vkb.status(),
             "settings": {
                 "vk": self.vk_finder.can_search,
                 "vk_messages": bool(self.vk_messages),
@@ -267,6 +272,8 @@ class App:
                 self.store.set_status(r["id"], "contacted")
             elif action == "restore" and r["status"] in ("skipped", "failed"):
                 self.store.set_status(r["id"], "new")
+            elif action == "restore_skip" and r["status"] == "skipped":
+                self.store.set_status(r["id"], "manual")
             elif action == "undo_contacted" and r["status"] == "contacted":
                 self.store.set_status(r["id"], "manual")
                 with self.store.lock:   # убираем отметку из счётчика «сегодня во ВК»
@@ -278,6 +285,40 @@ class App:
                 continue
             done += 1
         return {"ok": True, "done": done}
+
+    def vkb_open(self):
+        self.vkb.open()
+        return {"ok": True, **self.vkb.status()}
+
+    def send_vk_browser(self, lead_id, text):
+        """Пробел в окне бота: одно сообщение одному сообществу через окно браузера."""
+        r = self.store.get(int(lead_id or 0))
+        if not r or r["status"] not in ("manual", "new", "approved", "failed"):
+            return {"error": "Эта организация уже обработана"}
+        target = r["vk_group_id"] or r["screen_name"]
+        if not target:
+            return {"error": "У организации нет группы ВК"}
+        if self.store.vk_sent_today() >= self.cfg.vk_daily_limit:
+            return {"error": f"Дневной лимит во ВК ({self.cfg.vk_daily_limit}) исчерпан. "
+                             f"Его можно поднять в настройках (VK_DAILY_LIMIT)"}
+        text = (text or "").strip()
+        if not text:
+            return {"error": "Текст сообщения пустой"}
+        with self._vk_lock:
+            wait = 3 - (time.monotonic() - self._vk_last_send)   # защита от двойного нажатия
+            if wait > 0:
+                self._sleep(wait)
+            try:
+                res = self.vkb.send(target, text)
+            finally:
+                self._vk_last_send = time.monotonic()
+        if res.get("ok"):
+            self.store.set_status(r["id"], "contacted", "написали во ВК")
+            self.store.log_send(r["id"], f"vk:{target}", True)
+            return {"ok": True, "sent_today": self.store.vk_sent_today()}
+        if res.get("closed"):
+            self.store.update_fields(r["id"], note="сообщения сообщества закрыты")
+        return res
 
     def vk_opened(self, lead_id):
         """Нажата «Скопировать и открыть диалог»: организация сразу уходит в «Связались»."""
@@ -489,6 +530,10 @@ def make_handler(app: App):
                     except ValueError:
                         return self._json({"error": "Файл повреждён"}, 400)
                     res = app.import_file(data.get("filename", ""), raw, data.get("source", "file"))
+                elif path == "/api/vkb_open":
+                    res = app.vkb_open()
+                elif path == "/api/send_vkb":
+                    res = app.send_vk_browser(data.get("id"), data.get("text"))
                 elif path == "/api/vk_opened":
                     res = app.vk_opened(data.get("id"))
                 elif path == "/api/send_vk":

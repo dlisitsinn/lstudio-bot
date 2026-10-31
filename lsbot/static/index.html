@@ -106,6 +106,11 @@ h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
 textarea.msg{min-height:0;margin-top:4px;font-size:14px;background:#F7F6FB}
 .captcha{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;padding:10px 12px;border:1px solid var(--warn);background:var(--warn-soft);border-radius:8px}
 .captcha[hidden]{display:none}
+.vkb{display:flex;flex-wrap:wrap;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px 18px;margin-bottom:14px}
+.vkb.ready{border-color:var(--ok);background:var(--ok-soft)}
+.vkb.warn{border-color:var(--warn);background:var(--warn-soft)}
+.key{display:inline-block;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:0 7px;background:#fff;font-weight:600;font-size:13px}
+.cards .card:first-child{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 .captcha p{flex-basis:100%}
 .capin{border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:130px}
 
@@ -226,7 +231,7 @@ async function refresh(){
   renderNav(); renderLog(); renderFinder();
   $("#ver").textContent = "версия " + S.version;
   if (tab === "manual"){
-    const sig = S.manual_queue.map(l => l.id + ":" + (l.note||"")).join(",") + "|" + S.vk_sent_today + "|" + S.settings.vk_messages + "|" + (S.counts.manual||0);
+    const sig = S.manual_queue.map(l => l.id + ":" + (l.note||"")).join(",") + "|" + S.vk_sent_today + "|" + S.settings.vk_messages + "|" + (S.counts.manual||0) + "|" + S.vkb.state + S.vkb.message;
     if (sig === manualSig) return;
     manualSig = sig;
   }
@@ -318,9 +323,10 @@ function renderTab(){
     const Q = S.manual_queue, total = S.counts.manual || 0, auto = S.settings.vk_messages;
     const left = Math.max(0, S.vk_daily_limit - S.vk_sent_today);
     v.innerHTML = `<h1>${S.settings.only_vk ? "Написать во ВК" : "Написать во ВК и мессенджеры"}</h1>
-      <p class="sub">${auto
+      <p class="sub">${S.vkb.state === "ready" ? "Первая карточка — текущая. Прочитайте её: подходит — нажмите пробел, сообщение уйдёт во ВК; не подходит — нажмите S. Текст можно поправить прямо в карточке." : auto
         ? "Прочитайте карточку и, если подходит, нажмите «Отправить во ВК» — сообщение уйдёт сразу. Текст можно поправить прямо в карточке."
         : "Нажмите синюю кнопку: текст скопируется, диалог ВК откроется в новой вкладке, а организация сама перейдёт в «Связались». В диалоге — Ctrl+V и Enter, вернитесь сюда: следующая карточка уже на месте. Нажали случайно — «Отменить» во всплывающей подсказке."}</p>
+      ${vkbPanel()}
       <div class="sendbox">
         <div class="meter">Сегодня во ВК: ${S.vk_sent_today} из ${S.vk_daily_limit}<div class="track"><div class="fill" style="width:${Math.min(100,S.vk_sent_today/S.vk_daily_limit*100)}%"></div></div></div>
         <span class="hint">В очереди ${total}. Лимит — строка VK_DAILY_LIMIT в настройках.</span>
@@ -337,11 +343,21 @@ function renderTab(){
       ${items.length ? `<div class="layout">${listHTML(items, tab==="skipped")}${detailHTML()}</div>` : '<div class="list"><div class="empty"><b>Пока пусто</b></div></div>'}`;
   }
 }
+function vkbPanel(){
+  const st = S.vkb.state, msg = esc(S.vkb.message);
+  if (st === "ready") return `<div class="vkb ready"><b>Отправка клавишей включена.</b> <span class="key">Пробел</span> — отправить первую карточку, <span class="key">S</span> — пропустить. Окно ВК с отправкой открыто рядом — можно смотреть, что уходит.</div>`;
+  if (st === "installing" || st === "starting") return `<div class="vkb">${msg}</div>`;
+  if (st === "login") return `<div class="vkb warn"><b>Войдите во ВК</b> в открывшемся окне браузера (один раз). Бот сам заметит вход.</div>`;
+  return `<div class="vkb"><button class="btn primary" id="vkbOn">Включить отправку клавишей</button>
+    <span class="hint">Бот откроет отдельное окно Chrome или Edge, вы один раз войдёте во ВК — и дальше каждое сообщение уходит по нажатию пробела.${st === "error" ? "<br><b>Ошибка:</b> " + msg : ""}</span></div>`;
+}
 function cardHTML(l, auto, left){
   const wa = l.phone ? l.phone.replace(/\D/g,"").replace(/^8/,"7") : "";
   const hasVk = !!l.vk_link, closed = (l.note||"").includes("сообщения сообщества закрыты");
   if (!(l.id in draftCache)) draftCache[l.id] = l.vk_text;
-  const vkBtn = !hasVk || closed ? "" : auto
+  const vkBtn = !hasVk || closed ? "" : S.vkb.state === "ready"
+    ? `<button class="btn primary" data-sendvkb="${l.id}" ${left ? "" : "disabled"}>${left ? "Отправить во ВК (пробел)" : "Лимит на сегодня"}</button>`
+    : auto
     ? `<button class="btn primary" data-sendvk="${l.id}" ${left ? "" : "disabled"}>${left ? "Отправить во ВК" : "Лимит на сегодня"}</button>`
     : `<button class="btn primary" data-dialog="${l.id}" data-url="${esc(l.vk_group_id ? "https://vk.ru/im?sel=-" + l.vk_group_id : "https://vk.me/" + l.screen_name)}">Скопировать и открыть диалог ВК</button>`;
   return `<div class="card" id="card${l.id}"><div class="top"><div>
@@ -391,6 +407,9 @@ async function renderSettings(){
 }
 
 document.addEventListener("click", async e => {
+  if (e.target.closest("#vkbOn")){ const r = await api("/api/vkb_open", {}); manualSig = ""; return refresh(); }
+  const sb = e.target.closest("[data-sendvkb]");
+  if (sb){ return sendVkb(+sb.dataset.sendvkb, sb); }
   const sv = e.target.closest("[data-sendvk],[data-capsend]");
   if (sv){ return sendVk(+(sv.dataset.sendvk || sv.dataset.capsend), sv); }
   const d = e.target.closest("[data-dialog],[data-wa]");
@@ -459,6 +478,32 @@ $("#importer").addEventListener("submit", async e => {
     source: document.querySelector('input[name=fsrc]:checked').value});
   if (r.message){ toast(r.message); pickedFile = null; $("#file").value = ""; $("#dropTitle").textContent = "Перетащите сюда ещё одну таблицу или нажмите, чтобы выбрать"; drop.classList.remove("has"); }
   refresh();
+});
+let vkbBusy = false;
+async function sendVkb(id, btn){
+  if (vkbBusy) return;
+  vkbBusy = true;
+  if (btn){ btn.disabled = true; btn.textContent = "Отправляю…"; }
+  const name = (S.manual_queue.find(l => l.id === id) || {}).name || "";
+  const r = await api("/api/send_vkb", {id, text: draftCache[id]});
+  vkbBusy = false;
+  if (r.ok){
+    toast(`Отправлено: «${name}». Сегодня во ВК: ${r.sent_today}`, false,
+      async () => { await api("/api/action", {action: "undo_contacted", ids: [id]}); manualSig = ""; refresh(); });
+    delete draftCache[id];
+  }
+  manualSig = ""; refresh();
+}
+document.addEventListener("keydown", e => {
+  if (tab !== "manual" || !S || S.vkb.state !== "ready" || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.target.closest && e.target.closest("textarea,input")) return;   // печатаете текст — клавиши не перехватываем
+  const first = document.querySelector(".cards .card");
+  if (!first) return;
+  const id = +first.id.replace("card", "");
+  if (e.code === "Space"){ e.preventDefault(); const b = first.querySelector("[data-sendvkb]"); if (b && !b.disabled) sendVkb(id, b); }
+  else if (e.code === "KeyS"){ e.preventDefault();
+    api("/api/action", {action: "skip", ids: [id]}).then(() => { toast("Пропущено", false,
+      async () => { await api("/api/action", {action: "restore_skip", ids: [id]}); manualSig = ""; refresh(); }); manualSig = ""; refresh(); }); }
 });
 document.addEventListener("input", e => {
   if (e.target.dataset && e.target.dataset.text) draftCache[+e.target.dataset.text] = e.target.value;
