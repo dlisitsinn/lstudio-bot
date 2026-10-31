@@ -21,6 +21,9 @@ INPUT_SELECTORS = (
     '[contenteditable="true"]',
 )
 CAPTCHA_SELECTORS = ('img[src*="captcha"]', '[class*="captcha" i]')
+# фразы ВК, когда сообществу нельзя написать — пропускаем сразу, не дожидаясь поля ввода
+CLOSED_MARKERS = ("ограничил", "не принимает сообщ", "нельзя отправить", "не можете отправить",
+                  "сообщения отключены", "сообщения сообщества отключены")
 
 
 class VKBrowser:
@@ -170,7 +173,7 @@ class VKBrowser:
         else:
             self._set("login", "Войдите во ВК в открывшемся окне браузера — бот подождёт")
 
-    def _find_input(self, timeout_ms=15000):
+    def _find_input(self, timeout_ms=10000):
         deadline = time.monotonic() + timeout_ms / 1000
         while time.monotonic() < deadline:
             for sel in CAPTCHA_SELECTORS:
@@ -181,6 +184,12 @@ class VKBrowser:
                 loc = self._page.locator(sel)
                 if loc.count() and loc.first.is_visible():
                     return loc.first
+            try:
+                body = (self._page.inner_text("body", timeout=1000) or "").lower()
+            except Exception:
+                body = ""
+            if any(m in body for m in CLOSED_MARKERS):
+                return "closed"
             self._page.wait_for_timeout(300)
         return None
 
@@ -206,7 +215,7 @@ class VKBrowser:
         box = self._find_input()
         if box == "captcha":
             return {"error": "ВК показал капчу — решите её в окне браузера и нажмите пробел ещё раз"}
-        if box is None:
+        if box == "closed" or box is None:
             return {"error": "Не нашла поле для сообщения — возможно, у сообщества закрыты сообщения",
                     "closed": True}
         box.click()

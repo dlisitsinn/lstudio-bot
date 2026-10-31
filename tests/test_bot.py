@@ -852,3 +852,89 @@ def test_only_vk_hides_old_leads_without_vk():
     app = App(c, store, Finder(None), OSMFinder(), d, sender_factory=lambda n: BatchSender(c, store, d, n))
     assert [l["name"] for l in app.state()["leads"]["new"]] == ["С ВК"]
     assert store.count_by_status()["skipped"] == 1 and "1 организаций" in app.state()["log"][0]["text"]
+
+
+# ---------- отправка отмеченных карточек ----------
+class FakeVKB:
+    def __init__(self, plan=None):
+        self.state, self.plan, self.sent = "ready", list(plan or []), []
+
+    def status(self):
+        return {"state": self.state, "message": ""}
+
+    def send(self, target, text):
+        outcome = self.plan.pop(0) if self.plan else "ok"
+        if outcome == "ok":
+            self.sent.append((str(target), text))
+            return {"ok": True}
+        if outcome == "closed":
+            return {"error": "закрыты", "closed": True}
+        if outcome == "captcha":
+            return {"error": "ВК показал капчу — решите её"}
+        return {"error": "что-то не так"}
+
+    def open(self):
+        pass
+
+
+def batch_app(n=12, plan=None, limit=100):
+    c = cfg(only_vk=True, vk_daily_limit=limit)
+    store = Store(":memory:")
+    d = Drafter(c)
+    app = App(c, store, Finder(None), OSMFinder(), d, sender_factory=lambda x: BatchSender(c, store, d, x),
+              vkb=FakeVKB(plan))
+    app._sleep = lambda s: None
+    app.batch_pause = (0, 0)
+    for i in range(n):
+        store.add_lead({"uid": f"b:{i}", "source": "2gis", "name": f"Орг {i}", "vk_group_id": 100 + i})
+    ids = [r["id"] for r in store.by_status("new")]
+    app.action("approve", ids)
+    return app, store, ids
+
+
+def _wait_batch(app, timeout=5):
+    import time as _t
+    end = _t.monotonic() + timeout
+    while app.batch["running"] and _t.monotonic() < end:
+        _t.sleep(0.02)
+
+
+def test_batch_sends_max_10_and_skips_closed_quietly():
+    app, store, ids = batch_app(plan=["ok", "closed", "ok"])
+    r = app.start_vk_batch(ids, {str(ids[0]): "Свой текст"})
+    assert r == {"ok": True, "total": 10}                               # больше 10 за раз нельзя
+    _wait_batch(app)
+    b = app.state()["batch"]
+    assert b["sent"] == 9 and b["closed"] == 1 and b["errors"] == 0 and not b["running"]
+    assert app.vkb.sent[0] == ("100", "Свой текст")                     # правка текста сохранилась
+    assert store.get(ids[1])["status"] == "skipped" and "закрыты" in store.get(ids[1])["note"]
+    assert store.get(ids[10])["status"] == "manual"                     # 11-я не тронута
+    assert "у 1 закрыты сообщения" in app.state()["log"][0]["text"]
+
+
+def test_batch_captcha_pause_resume_stop_and_limit():
+    app, store, ids = batch_app(plan=["captcha", "ok"])
+    app.start_vk_batch(ids[:3])
+    import time as _t
+    for _ in range(100):
+        if app.batch["captcha"]:
+            break
+        _t.sleep(0.02)
+    assert app.state()["batch"]["captcha"] and app.batch["sent"] == 0  # ждёт капчу
+    app.resume_vk_batch()
+    _wait_batch(app)
+    assert app.batch["sent"] == 3
+
+    app2, store2, ids2 = batch_app(limit=2)
+    app2.start_vk_batch(ids2)
+    _wait_batch(app2)
+    assert app2.batch["total"] == 2 and store2.vk_sent_today() == 2     # дневной лимит
+    assert "лимит" in app2.start_vk_batch(ids2[2:])["error"]
+
+    app3, _, ids3 = batch_app()
+    app3.batch_pause = (0.3, 0.3)
+    app3.start_vk_batch(ids3)
+    _t.sleep(0.1); app3.stop_vk_batch(); _wait_batch(app3)
+    assert app3.batch["sent"] < 10 and "остановлено" in app3.state()["log"][0]["text"]
+    app3.vkb.state = "login"
+    assert "войдите" in app3.start_vk_batch(ids3)["error"]

@@ -47,6 +47,11 @@ class App:
             from .vkbrowser import VKBrowser
             vkb = VKBrowser(Path(__file__).resolve().parent.parent / "data" / "vk-browser", notify=self.notify)
         self.vkb = vkb
+        self.batch = {"running": False, "total": 0, "done": 0, "sent": 0, "closed": 0, "errors": 0,
+                      "current": "", "captcha": False}
+        self._batch_stop = threading.Event()
+        self._batch_resume = threading.Event()
+        self.batch_pause = (5, 12)   # пауза между сообщениями, секунд
         if cfg.only_vk:
             self._hide_without_vk()
 
@@ -102,6 +107,7 @@ class App:
             "log": list(self.log)[::-1],
             "version": self.version,
             "vkb": self.vkb.status(),
+            "batch": dict(self.batch),
             "settings": {
                 "vk": self.vk_finder.can_search,
                 "vk_messages": bool(self.vk_messages),
@@ -320,6 +326,87 @@ class App:
             self.store.update_fields(r["id"], note="сообщения сообщества закрыты")
         return res
 
+    # ---------- отправка отмеченных карточек (не больше 10 за раз) ----------
+    BATCH_MAX = 10
+
+    def start_vk_batch(self, ids, texts=None):
+        if self.batch["running"]:
+            return {"error": "Отправка уже идёт"}
+        if self.vkb.state != "ready":
+            return {"error": "Сначала включите отправку и войдите во ВК в окне браузера"}
+        ids = [int(i) for i in (ids or [])][: self.BATCH_MAX]
+        rows = [r for r in (self.store.get(i) for i in ids)
+                if r and r["status"] in ("manual", "new", "approved", "failed") and (r["vk_group_id"] or r["screen_name"])]
+        if not rows:
+            return {"error": "Отметьте карточки, которым писать"}
+        left = self.cfg.vk_daily_limit - self.store.vk_sent_today()
+        if left <= 0:
+            return {"error": f"Дневной лимит во ВК ({self.cfg.vk_daily_limit}) исчерпан"}
+        rows = rows[:left]
+        texts = {int(k): v for k, v in (texts or {}).items() if v and v.strip()}
+        self._batch_stop.clear()
+        self.batch = {"running": True, "total": len(rows), "done": 0, "sent": 0, "closed": 0, "errors": 0,
+                      "current": "", "captcha": False}
+        threading.Thread(target=self._run_batch, args=(rows, texts), daemon=True).start()
+        return {"ok": True, "total": len(rows)}
+
+    def stop_vk_batch(self):
+        self._batch_stop.set()
+        self._batch_resume.set()
+        return {"ok": True}
+
+    def resume_vk_batch(self):
+        self._batch_resume.set()
+        return {"ok": True}
+
+    def _run_batch(self, rows, texts):
+        b = self.batch
+        try:
+            for i, r in enumerate(rows):
+                if self._batch_stop.is_set():
+                    break
+                b["current"] = r["name"]
+                text = texts.get(r["id"]) or self.drafter.vk(r)
+                while True:
+                    res = self.send_vk_browser(r["id"], text)
+                    if res.get("ok"):
+                        b["sent"] += 1
+                        break
+                    if res.get("closed"):          # сообщения закрыты — тихо пропускаем
+                        self.store.set_status(r["id"], "skipped", "сообщения сообщества закрыты")
+                        b["closed"] += 1
+                        break
+                    if "капч" in (res.get("error") or ""):   # ждём, пока решат капчу в окне браузера
+                        b["captcha"] = True
+                        self._batch_resume.clear()
+                        self._batch_resume.wait()
+                        b["captcha"] = False
+                        if self._batch_stop.is_set():
+                            break
+                        continue
+                    b["errors"] += 1
+                    self.store.update_fields(r["id"], note="не отправилось: " + (res.get("error") or "")[:120])
+                    break
+                b["done"] = i + 1
+                if self._batch_stop.is_set() or "лимит" in str(res.get("error", "")):
+                    break
+                if b["errors"] >= 3 and b["sent"] == 0:
+                    self.notify("⛔ Три ошибки подряд — остановила отправку. Посмотрите на окно ВК")
+                    break
+                if i < len(rows) - 1:
+                    self._batch_stop.wait(random.uniform(*self.batch_pause))
+        finally:
+            msg = f"📨 ВК: отправлено {b['sent']} из {b['total']}"
+            if b["closed"]:
+                msg += f", у {b['closed']} закрыты сообщения (пропущены)"
+            if b["errors"]:
+                msg += f", не отправилось {b['errors']}"
+            if self._batch_stop.is_set():
+                msg += " — остановлено вами"
+            self.notify(msg)
+            b["running"] = False
+            b["current"] = ""
+
     def vk_opened(self, lead_id):
         """Нажата «Скопировать и открыть диалог»: организация сразу уходит в «Связались»."""
         r = self.store.get(int(lead_id or 0))
@@ -532,6 +619,12 @@ def make_handler(app: App):
                     res = app.import_file(data.get("filename", ""), raw, data.get("source", "file"))
                 elif path == "/api/vkb_open":
                     res = app.vkb_open()
+                elif path == "/api/vk_batch":
+                    res = app.start_vk_batch(data.get("ids"), data.get("texts"))
+                elif path == "/api/vk_batch_stop":
+                    res = app.stop_vk_batch()
+                elif path == "/api/vk_batch_resume":
+                    res = app.resume_vk_batch()
                 elif path == "/api/send_vkb":
                     res = app.send_vk_browser(data.get("id"), data.get("text"))
                 elif path == "/api/vk_opened":
