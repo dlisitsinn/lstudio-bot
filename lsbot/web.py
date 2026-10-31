@@ -41,6 +41,19 @@ class App:
         self._vk_lock = threading.Lock()
         self._vk_last_send = 0.0
         self._sleep = time.sleep
+        if cfg.only_vk:
+            self._hide_without_vk()
+
+    def _hide_without_vk(self):
+        """Режим «только ВК»: организации без группы ВК из прошлых загрузок — в «Пропущенные»."""
+        with self.store.lock:
+            cur = self.store.conn.execute(
+                "UPDATE leads SET status='skipped', note='нет группы ВК' "
+                "WHERE status IN ('new','manual','approved','failed') "
+                "AND vk_group_id IS NULL AND (screen_name IS NULL OR screen_name='')")
+            self.store.conn.commit()
+        if cur.rowcount:
+            self.notify(f"Режим «только ВК»: {cur.rowcount} организаций без группы ВК перенесены в «Пропущенные»")
 
     def check_vk_messages(self):
         """Проверяет, может ли токен отправлять сообщения (право «messages» = 4096)."""

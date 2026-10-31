@@ -841,3 +841,14 @@ def test_vk_opened_marks_contacted_and_undo():
     assert store.get(ids[0])["status"] == "manual" and store.vk_sent_today() == 0
     app.vk_opened(ids[0]); app.vk_opened(ids[1])
     assert "лимит" in app.vk_opened(ids[2])["error"]
+
+
+def test_only_vk_hides_old_leads_without_vk():
+    c = cfg(only_vk=True)
+    store = Store(":memory:")
+    store.add_lead({"uid": "a", "source": "2gis", "name": "С ВК", "screen_name": "club_a"})
+    store.add_lead({"uid": "b", "source": "2gis", "name": "Без ВК", "phone": "+79000000000"})
+    d = Drafter(c)
+    app = App(c, store, Finder(None), OSMFinder(), d, sender_factory=lambda n: BatchSender(c, store, d, n))
+    assert [l["name"] for l in app.state()["leads"]["new"]] == ["С ВК"]
+    assert store.count_by_status()["skipped"] == 1 and "1 организаций" in app.state()["log"][0]["text"]
