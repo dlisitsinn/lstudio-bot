@@ -8,12 +8,14 @@ SETTINGS = [
     # (имя, ключ, значение, только_если_нет_строки)
     ("skip_dead_sites", "SKIP_DEAD_SITES", "да", True),
     ("vk_group_token_line", "VK_GROUP_TOKEN", "", True),
+    ("auto_queue", "AUTO_QUEUE", "да", True),
 ]
 
 
 # Тексты, которые вы попросили заменить: стандартный текст копируется поверх вашего (старый — в *.old.txt)
 TEXTS = [
     ("vk_text_demo_offer", "vk.txt"),
+    ("email_text_demo_offer", "email.txt"),
 ]
 
 

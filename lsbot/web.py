@@ -23,6 +23,11 @@ def has_vk(lead) -> bool:
     return bool(lead.get("screen_name") or lead.get("vk_group_id"))
 
 
+def reachable(lead) -> bool:
+    """Есть куда написать: группа ВК или почта."""
+    return has_vk(lead) or bool(lead.get("email"))
+
+
 class App:
     def __init__(self, cfg, store, vk_finder, osm_finder, drafter, sender_factory, mail_check=None,
                  check_alive=site_is_alive, vkb=None):
@@ -56,15 +61,48 @@ class App:
             self._hide_without_vk()
 
     def _hide_without_vk(self):
-        """Режим «только ВК»: организации без группы ВК из прошлых загрузок — в «Пропущенные»."""
+        """Режим «только ВК»: организации без группы ВК и без почты — в «Пропущенные».
+        Те, кого раньше убрали за отсутствие группы ВК, но у кого есть почта, возвращаются в очередь писем."""
         with self.store.lock:
             cur = self.store.conn.execute(
-                "UPDATE leads SET status='skipped', note='нет группы ВК' "
+                "UPDATE leads SET status='skipped', note='нет группы ВК и почты' "
                 "WHERE status IN ('new','manual','approved','failed') "
-                "AND vk_group_id IS NULL AND (screen_name IS NULL OR screen_name='')")
+                "AND vk_group_id IS NULL AND (screen_name IS NULL OR screen_name='') "
+                "AND (email IS NULL OR email='')")
+            back = self.store.conn.execute(
+                "UPDATE leads SET status=?, note=NULL WHERE status='skipped' AND note='нет группы ВК' "
+                "AND email IS NOT NULL AND email!=''", ("approved" if self.cfg.auto_queue else "new",))
             self.store.conn.commit()
         if cur.rowcount:
-            self.notify(f"Режим «только ВК»: {cur.rowcount} организаций без группы ВК перенесены в «Пропущенные»")
+            self.notify(f"Режим «только ВК»: {cur.rowcount} организаций без группы ВК и почты — в «Пропущенных»")
+        if back.rowcount:
+            self.notify(f"📧 {back.rowcount} организаций с почтой вернула из «Пропущенных» в очередь писем")
+
+    def _auto_route(self, added):
+        """Найденные сразу раскладываются: есть группа ВК — в «Написать во ВК», только почта — в «Письма»."""
+        if not self.cfg.auto_queue or not added:
+            return 0, 0
+        vk = mail = 0
+        for lead in added:
+            with self.store.lock:
+                uid = lead.get("uid") or (f"vk:{lead['vk_group_id']}" if lead.get("vk_group_id") else "")
+                row = self.store.conn.execute("SELECT id FROM leads WHERE uid=?", (uid,)).fetchone()
+            if not row:
+                continue
+            r = self.store.get(row["id"])
+            if not r or r["status"] != "new":
+                continue
+            if r["vk_group_id"] or r["screen_name"]:
+                self.store.set_status(r["id"], "manual")
+                vk += 1
+            elif r["email"]:
+                self.store.set_status(r["id"], "approved")
+                mail += 1
+        return vk, mail
+
+    def _route_msg(self, added) -> str:
+        vk, mail = self._auto_route(added)
+        return f" → во ВК {vk}, в письма {mail}" if (vk or mail) else ""
 
     def check_vk_messages(self):
         """Проверяет, может ли токен отправлять сообщения (право «messages» = 4096)."""
@@ -160,13 +198,14 @@ class App:
                         query, city, want, skip_uids=self.store.known_uids())
                 no_vk = 0
                 if self.cfg.only_vk:
-                    no_vk = sum(1 for l in leads if not has_vk(l))
-                    leads = [l for l in leads if has_vk(l)]
+                    no_vk = sum(1 for l in leads if not reachable(l))
+                    leads = [l for l in leads if reachable(l)]
                 added = [l for l in leads if self.store.add_lead(l)]
                 with_email = sum(1 for l in added if l.get("email"))
                 msg = (f"✅ {name}: проверено {stats['checked']}, с сайтом {stats['with_site']}, "
                        f"новых без сайта {len(added)}")
-                msg += f", без ВК пропущено {no_vk}" if self.cfg.only_vk else f" (с почтой {with_email})"
+                msg += f", без ВК и почты пропущено {no_vk}" if self.cfg.only_vk else f" (с почтой {with_email})"
+                msg += self._route_msg(added)
                 self.notify(msg)
             except (ValueError, ConnectionError) as exc:
                 self.notify(f"⚠️ {name}: {exc}")
@@ -203,9 +242,9 @@ class App:
     def _import(self, leads, stats):
         try:
             no_vk = 0
-            if self.cfg.only_vk:   # нужны только организации с группой ВК
-                no_vk = sum(1 for l in leads if not has_vk(l))
-                leads = [l for l in leads if has_vk(l)]
+            if self.cfg.only_vk:   # нужны организации с группой ВК или почтой
+                no_vk = sum(1 for l in leads if not reachable(l))
+                leads = [l for l in leads if reachable(l)]
             from concurrent.futures import ThreadPoolExecutor
             result, with_site, dead = [], stats["with_site"], 0
             if self.cfg.skip_dead_sites:   # сайт указан — значит, сайт у них есть; не проверяем и не пишем
@@ -237,7 +276,8 @@ class App:
             hidden = stats.get("hidden", 0)
             msg = (f"📄 Файл: строк {stats['rows'] - hidden}, с сайтом {with_site + st['with_site']}, "
                    f"новых без сайта {len(added)}")
-            msg += f", без ВК пропущено {no_vk}" if self.cfg.only_vk else f" (с почтой {with_email})"
+            msg += f", без ВК и почты пропущено {no_vk}" if self.cfg.only_vk else f" (с почтой {with_email})"
+            msg += self._route_msg(added)
             if dupes:
                 msg += f", уже были в базе {dupes}"
             if dead:
@@ -261,6 +301,7 @@ class App:
             return {"error": str(exc)}
         added = [l for l in leads if self.store.add_lead(l)]
         msg = f"Проверено: без сайта {len(added)}, с сайтом {len(with_site)}, уже были {len(known)}"
+        msg += self._route_msg(added)
         self.notify("🔗 " + msg)
         return {"ok": True, "message": msg}
 

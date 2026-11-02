@@ -24,7 +24,7 @@ def cfg(**kw):
         sender_name="Анастасия, LStudio", daily_email_limit=3, email_delay_min=0, email_delay_max=0,
         min_members=10, default_city="Челябинск", portfolio_url="https://dlisitsinn.github.io/",
         studio_vk_url="https://vk.ru/lssttudio", db_path=Path(":memory:"), only_vk=False,
-        skip_dead_sites=False,
+        skip_dead_sites=False, auto_queue=False,
     )
     base.update(kw)
     return Config(**base)
@@ -151,8 +151,8 @@ def test_drafts():
     lead = store.by_status("new")[0]
     d = Drafter(cfg())
     subject, body = d.email(lead)
-    assert subject == "Сайт для «Салон красоты Лаванда» — от 5 000 ₽ за 2 дня"
-    assert "velvet" in body and "Анастасия, LStudio" in body and "{" not in body
+    assert subject == "Сделал черновик сайта для «Салон красоты Лаванда»"
+    assert "dlisitsinn.github.io" in body and "Анастасия, LStudio" in body and "{" not in body
     assert "ответьте «нет»" in body
     vk = d.vk(lead)
     assert "Салон красоты Лаванда" in vk and "#" not in vk.splitlines()[0]
@@ -332,7 +332,7 @@ def test_app_full_flow():
     vk_lead = next(l for l in st["leads"]["new"] if l["source"] == "vk")
     assert "во ВКонтакте" in app.lead(vk_lead["id"])["email_body"]
     detail = app.lead(ids[0])
-    assert detail["email_subject"].startswith("Сайт для") and detail["vk_text"]
+    assert detail["email_subject"].startswith("Сделал черновик") and detail["vk_text"]
     assert app.action("approve", ids)["done"] == 4
     st = app.state()
     assert len(st["leads"]["approved"]) == 3 and len(st["leads"]["manual"]) == 1   # Улыбка без почты
@@ -823,12 +823,25 @@ def test_only_vk_import_and_approve():
     app.import_file("export.csv", CSV_2GIS.encode(), "2gis")
     app.search_thread.join(5)
     names = {l["name"] for l in app.state()["leads"]["new"]}
-    assert names == {"Лаванда"}                                  # Ноготок и Цветы — без ВК, пропущены
-    assert "без ВК пропущено 3" in app.state()["log"][0]["text"]
-    lav = app.state()["leads"]["new"][0]
-    assert lav["email"]                                          # почта есть, но…
+    # Лаванда — группа ВК; Ноготок — без ВК, но с почтой (остаётся для писем); Цветы — ни ВК, ни почты
+    assert names == {"Лаванда", "Студия маникюра «Ноготок»"}, names
+    assert "без ВК и почты пропущено" in app.state()["log"][0]["text"]
+    lav = next(l for l in app.state()["leads"]["new"] if l["name"] == "Лаванда")
     app.action("approve", [lav["id"]])
-    assert store.get(lav["id"])["status"] == "manual"            # …идёт во вкладку ВК, не в письма
+    assert store.get(lav["id"])["status"] == "manual"            # есть ВК — во вкладку ВК, не в письма
+
+
+def test_auto_queue_routes_vk_and_email():
+    app, store = make_import_app()
+    app.cfg.only_vk = True
+    app.cfg.auto_queue = True
+    app.import_file("export.csv", CSV_2GIS.encode(), "2gis")
+    app.search_thread.join(5)
+    st = app.state()
+    assert st["leads"]["new"] == []
+    assert [l["name"] for l in st["leads"]["manual"]] == ["Лаванда"]
+    assert [l["name"] for l in st["leads"]["approved"]] == ["Студия маникюра «Ноготок»"]
+    assert "во ВК 1, в письма 1" in st["log"][0]["text"]
 
 
 def test_vk_opened_marks_contacted_and_undo():
@@ -845,14 +858,17 @@ def test_vk_opened_marks_contacted_and_undo():
 
 
 def test_only_vk_hides_old_leads_without_vk():
-    c = cfg(only_vk=True)
+    c = cfg(only_vk=True, auto_queue=True)
     store = Store(":memory:")
     store.add_lead({"uid": "a", "source": "2gis", "name": "С ВК", "screen_name": "club_a"})
     store.add_lead({"uid": "b", "source": "2gis", "name": "Без ВК", "phone": "+79000000000"})
+    store.add_lead({"uid": "c", "source": "2gis", "name": "Только почта", "email": "c@mail.ru"})
+    store.set_status(3, "skipped", "нет группы ВК")             # раньше убрали за отсутствие ВК
     d = Drafter(c)
     app = App(c, store, Finder(None), OSMFinder(), d, sender_factory=lambda n: BatchSender(c, store, d, n))
     assert [l["name"] for l in app.state()["leads"]["new"]] == ["С ВК"]
-    assert store.count_by_status()["skipped"] == 1 and "1 организаций" in app.state()["log"][0]["text"]
+    assert store.count_by_status()["skipped"] == 1
+    assert [l["name"] for l in app.state()["leads"]["approved"]] == ["Только почта"]   # вернулась в письма
 
 
 # ---------- отправка отмеченных карточек ----------
@@ -945,7 +961,7 @@ def test_batch_captcha_pause_resume_stop_and_limit():
 def test_settings_migration(tmp_path):
     from lsbot import migrations
     (tmp_path / ".env").write_text("SMTP_USER=a@b.ru\nVK_DAILY_LIMIT=20\n", encoding="utf-8")
-    assert migrations.apply(tmp_path) == ["VK_DAILY_LIMIT=2000", "SKIP_DEAD_SITES=да", "VK_GROUP_TOKEN="]
+    assert migrations.apply(tmp_path) == ["VK_DAILY_LIMIT=2000", "SKIP_DEAD_SITES=да", "VK_GROUP_TOKEN=", "AUTO_QUEUE=да"]
     assert "VK_DAILY_LIMIT=2000" in (tmp_path / ".env").read_text(encoding="utf-8")
     assert "SMTP_USER=a@b.ru" in (tmp_path / ".env").read_text(encoding="utf-8")
     (tmp_path / ".env").write_text("VK_DAILY_LIMIT=50\n", encoding="utf-8")   # потом поменяли сами

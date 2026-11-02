@@ -42,6 +42,7 @@ class Config:
     vk_daily_limit: int = 2000
     only_vk: bool = True
     skip_dead_sites: bool = True
+    auto_queue: bool = True
     vk_group_token: str = ""
 
     def email_ready(self) -> bool:
@@ -83,6 +84,7 @@ def load_config(env_path: Path = None) -> Config:
         daily_email_limit=_int(get("DAILY_EMAIL_LIMIT"), 25),
         vk_daily_limit=max(1, min(_int(get("VK_DAILY_LIMIT"), 2000), 5000)),
         only_vk=get("ONLY_VK", "да").strip().lower() not in ("нет", "no", "0", "false"),
+        auto_queue=get("AUTO_QUEUE", "да").strip().lower() not in ("нет", "no", "0", "false"),
         skip_dead_sites=get("SKIP_DEAD_SITES", "да").strip().lower() not in ("нет", "no", "0", "false"),
         vk_group_token=_vk_token(get("VK_GROUP_TOKEN")),
         email_delay_min=_int(get("EMAIL_DELAY_MIN"), 60),
