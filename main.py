@@ -89,6 +89,8 @@ def main():
     from lsbot import migrations
     for line in migrations.apply(BASE_DIR):
         print(f"Настройка обновлена: {line}")
+    for name in migrations.apply_texts(BASE_DIR):
+        print(f"Текст обновлён: {name} (прежний сохранён в data/templates)")
     cfg = load_config()
     if len(sys.argv) > 1 and sys.argv[1] == "check":
         cmd_check(cfg)

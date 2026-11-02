@@ -997,3 +997,17 @@ def test_site_is_alive_falls_back_on_certificate(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", fake_open)
     assert finder.site_is_alive("salon-roza.ru")
     assert calls == [("https://salon-roza.ru", False), ("https://salon-roza.ru", True)]
+
+
+def test_text_migration_replaces_user_vk_text(tmp_path):
+    from lsbot import migrations
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "templates" / "vk.txt").write_text("НОВЫЙ {name}", encoding="utf-8")
+    (tmp_path / "data" / "templates").mkdir(parents=True)
+    (tmp_path / "data" / "templates" / "vk.txt").write_text("старый", encoding="utf-8")
+    assert migrations.apply_texts(tmp_path) == ["vk.txt"]
+    assert (tmp_path / "data" / "templates" / "vk.txt").read_text(encoding="utf-8") == "НОВЫЙ {name}"
+    assert (tmp_path / "data" / "templates" / "vk.old.txt").read_text(encoding="utf-8") == "старый"
+    (tmp_path / "data" / "templates" / "vk.txt").write_text("поправила сама", encoding="utf-8")
+    assert migrations.apply_texts(tmp_path) == []                       # второй раз не трогаем
+    assert (tmp_path / "data" / "templates" / "vk.txt").read_text(encoding="utf-8") == "поправила сама"
