@@ -21,7 +21,8 @@ from lsbot.web import App, serve
 
 def build(cfg):
     user_vk = VK(cfg.vk_user_token) if cfg.vk_user_token else None
-    vk_finder = Finder(user_vk, min_members=cfg.min_members)
+    group_vk = VK(cfg.vk_group_token) if cfg.vk_group_token else None
+    vk_finder = Finder(user_vk, min_members=cfg.min_members, group_vk=group_vk, skip_dead=cfg.skip_dead_sites)
     osm_finder = OSMFinder(vk_finder=vk_finder)
     store = Store(cfg.db_path)
     drafter = Drafter(cfg)
@@ -63,6 +64,10 @@ def run(cfg, open_browser=True):
     version_file = BASE_DIR / "data" / ".version"
     version = version_file.read_text().strip()[:7] if version_file.exists() else "локальная"
     app.notify(f"Бот запущен (версия {version})")
+    if cfg.skip_dead_sites:
+        moved = app.skip_dead_site_leads()
+        if moved:
+            app.notify(f"🧹 Убрала из очереди {moved} организаций, у которых указан сайт (они в «Пропущенных»)")
     threading.Thread(target=app.check_vk_messages, daemon=True).start()
     print("🤖 Бот LStudio запущен.")
     print(f"   Окно управления: {url}  (откроется в браузере само)")

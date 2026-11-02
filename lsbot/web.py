@@ -208,6 +208,10 @@ class App:
                 leads = [l for l in leads if has_vk(l)]
             from concurrent.futures import ThreadPoolExecutor
             result, with_site, dead = [], stats["with_site"], 0
+            if self.cfg.skip_dead_sites:   # сайт указан — значит, сайт у них есть; не проверяем и не пишем
+                listed = [l for l in leads if l.get("_sites")]
+                with_site += len(listed)
+                leads = [l for l in leads if not l.get("_sites")]
             to_check = [l for l in leads if l.get("_sites")]
             if len(to_check) > 20:
                 self.notify(f"Проверяю, открываются ли {len(to_check)} сайтов из файла…")
@@ -503,10 +507,22 @@ class App:
             return {"ok": True, "message": "Останавливаю после текущего письма"}
         return {"ok": True, "message": "Рассылка не идёт"}
 
+    def skip_dead_site_leads(self) -> int:
+        """Организации из очереди, у которых указан (пусть и неоткрывающийся) сайт, — в «Пропущенные»."""
+        moved = 0
+        for r in self.store.by_status("new", "approved", "manual", "failed"):
+            if "не открывается" in (r["note"] or ""):
+                self.store.set_status(r["id"], "skipped", (r["note"] or "")[:200])
+                moved += 1
+        return moved
+
     def check(self):
         lines = []
         if not self.vk_finder.can_search:
             lines.append(["warn", "Токена ВК нет — поиск только по карте, отправка во ВК вручную"])
+            if not self.cfg.vk_group_token:
+                lines.append(["warn", "Нет ключа сообщества (VK_GROUP_TOKEN) — бот не видит сайты, указанные "
+                                      "в группах ВК, и пишет тем, у кого сайт уже есть"])
         else:
             try:
                 self.vk_finder.vk.call("database.getCities", country_id=1, q="Москва", count=1)
@@ -523,6 +539,12 @@ class App:
                         if not t.startswith("vk1.a.") or len(t) < 150 else
                         " Сам токен выглядит целым — значит, ВК его отозвал: получите новый и вставьте именно его.")
                 lines.append(["err", f"Токен ВК не принят ({shown}).{hint}"])
+        if self.cfg.vk_group_token:
+            try:
+                self.vk_finder.group_vk.call("groups.getById", group_ids="vk")
+                lines.append(["ok", "Ключ сообщества работает — бот проверяет сайты в группах ВК"])
+            except Exception as exc:
+                lines.append(["err", f"Ключ сообщества не принят: {exc}"])
         if not self.cfg.email_ready():
             lines.append(["warn", "Почта не настроена — письма отправлять нельзя"])
         elif self.mail_check:

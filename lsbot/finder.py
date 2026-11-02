@@ -101,22 +101,41 @@ def own_sites(group: dict) -> list:
     return result
 
 
-def site_is_alive(url: str, timeout: int = 8) -> bool:
-    """Открывается ли сайт. Любой ответ сервера, кроме 404/410/5xx, считаем «живым»."""
-    if "://" not in url:
-        url = "http://" + url
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status < 500
-    except urllib.error.HTTPError as exc:
-        return exc.code not in (404, 410) and exc.code < 500
-    except Exception:
-        return False
+def site_is_alive(url: str, timeout: int = 12) -> bool:
+    """Открывается ли сайт. Любой ответ сервера, кроме 404/410/5xx, считаем «живым».
+
+    Пробуем и https, и http, а при ошибке сертификата — без проверки сертификата:
+    у многих российских сайтов сертификат Минцифры, который Python не знает, хотя в браузере сайт открывается.
+    """
+    import ssl
+    bare = re.sub(r"^https?://", "", url.strip(), flags=re.I)
+    tries = [url if "://" in url else "https://" + bare, "http://" + bare]
+    insecure = ssl.create_default_context()
+    insecure.check_hostname = False
+    insecure.verify_mode = ssl.CERT_NONE
+    for u in dict.fromkeys(tries):
+        for ctx in (None, insecure):
+            req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                                                   "AppleWebKit/537.36 Chrome/130 Safari/537.36"})
+            try:
+                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                    if resp.status < 500:
+                        return True
+            except urllib.error.HTTPError as exc:
+                if exc.code not in (404, 410) and exc.code < 500:
+                    return True
+            except Exception as exc:
+                if ctx is None and "CERTIFICATE" in str(exc).upper():
+                    continue            # повторим без проверки сертификата
+                break
+    return False
 
 
-def analyze_group(group: dict, min_members: int = 0, check_alive=site_is_alive):
-    """Возвращает словарь-лид, если у группы нет работающего сайта, иначе None."""
+def analyze_group(group: dict, min_members: int = 0, check_alive=site_is_alive, skip_dead: bool = False):
+    """Возвращает словарь-лид, если у группы нет работающего сайта, иначе None.
+
+    skip_dead=True: если в группе вообще указан сайт (даже неоткрывающийся) — организацию пропускаем.
+    """
     if group.get("deactivated") or group.get("is_closed", 0) != 0:
         return None
     if group.get("members_count", 0) < min_members:
@@ -125,7 +144,7 @@ def analyze_group(group: dict, min_members: int = 0, check_alive=site_is_alive):
     note = None
     sites = own_sites(group)
     if sites:
-        if check_alive is None:
+        if check_alive is None or skip_dead:
             return None
         if any(check_alive(u) for u in sites):
             return None
@@ -188,11 +207,13 @@ def parse_group_links(text: str) -> list:
 
 
 class Finder:
-    def __init__(self, vk: VK, min_members: int = 30, check_alive=site_is_alive, group_vk: VK = None):
+    def __init__(self, vk: VK, min_members: int = 30, check_alive=site_is_alive, group_vk: VK = None,
+                 skip_dead: bool = False):
         self.vk = vk                    # токен страницы: нужен только для поиска (может быть None)
         self.group_vk = group_vk or vk  # токен сообщества: проверка групп по ссылкам
         self.min_members = min_members
         self.check_alive = check_alive
+        self.skip_dead = skip_dead
         self._city_cache = {}
 
     def city_id(self, city: str):
@@ -223,7 +244,7 @@ class Finder:
             if group["id"] in skip_ids:
                 known.append(group.get("name", ""))
                 continue
-            lead = analyze_group(group, 0, self.check_alive)
+            lead = analyze_group(group, 0, self.check_alive, self.skip_dead)
             if lead is None:
                 with_site.append(group.get("name", ""))
             else:
@@ -268,7 +289,7 @@ class Finder:
                 if group.get("is_closed", 0) != 0 or group.get("members_count", 0) < self.min_members:
                     stats["skipped"] += 1
                     continue
-                lead = analyze_group(group, self.min_members, self.check_alive)
+                lead = analyze_group(group, self.min_members, self.check_alive, self.skip_dead)
                 if lead is None:
                     stats["with_site"] += 1
                     continue
@@ -305,7 +326,7 @@ def enrich_with_vk(vk_finder, leads, stats):
     for lead in leads:
         g = groups.get((lead.get("screen_name") or "").lower()) or groups.get(str(lead.get("vk_group_id") or ""))
         if g:
-            vk_lead = analyze_group(g, 0, vk_finder.check_alive)
+            vk_lead = analyze_group(g, 0, vk_finder.check_alive, getattr(vk_finder, "skip_dead", False))
             if vk_lead is None:
                 stats["with_site"] = stats.get("with_site", 0) + 1
                 continue

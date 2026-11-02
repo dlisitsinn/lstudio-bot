@@ -24,6 +24,7 @@ def cfg(**kw):
         sender_name="Анастасия, LStudio", daily_email_limit=3, email_delay_min=0, email_delay_max=0,
         min_members=10, default_city="Челябинск", portfolio_url="https://dlisitsinn.github.io/",
         studio_vk_url="https://vk.ru/lssttudio", db_path=Path(":memory:"), only_vk=False,
+        skip_dead_sites=False,
     )
     base.update(kw)
     return Config(**base)
@@ -944,9 +945,55 @@ def test_batch_captcha_pause_resume_stop_and_limit():
 def test_settings_migration(tmp_path):
     from lsbot import migrations
     (tmp_path / ".env").write_text("SMTP_USER=a@b.ru\nVK_DAILY_LIMIT=20\n", encoding="utf-8")
-    assert migrations.apply(tmp_path) == ["VK_DAILY_LIMIT=2000"]
+    assert migrations.apply(tmp_path) == ["VK_DAILY_LIMIT=2000", "SKIP_DEAD_SITES=да", "VK_GROUP_TOKEN="]
     assert "VK_DAILY_LIMIT=2000" in (tmp_path / ".env").read_text(encoding="utf-8")
     assert "SMTP_USER=a@b.ru" in (tmp_path / ".env").read_text(encoding="utf-8")
     (tmp_path / ".env").write_text("VK_DAILY_LIMIT=50\n", encoding="utf-8")   # потом поменяли сами
     assert migrations.apply(tmp_path) == []                                   # второй раз не трогаем
     assert "VK_DAILY_LIMIT=50" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_skip_dead_sites_everywhere():
+    # в группе указан сайт, который не открылся, — при skip_dead организацию не берём
+    assert analyze_group(GROUPS[6], 10, fake_alive, skip_dead=True) is None
+    assert analyze_group(GROUPS[1], 10, fake_alive, skip_dead=True) is not None   # сайта нет — клиент
+
+
+def test_import_skips_listed_sites():
+    app, store = make_app(skip_dead_sites=True)
+    app.check_alive = alive_stub
+    app.import_file("export.csv", CSV_2GIS.encode("cp1251"), "2gis")
+    app.search_thread.join(5)
+    names = {l["name"] for l in app.state()["leads"]["new"]}
+    assert "Цветы у дома" not in names and "Лаванда" in names     # сайт указан (хоть и мёртвый) — не пишем
+
+
+def test_skip_dead_moves_queue_and_import(tmp_path):
+    app, store = make_app(skip_dead_sites=True)
+    lead = analyze_group(GROUPS[6], 10, fake_alive)
+    store.add_lead(lead)
+    store.add_lead(analyze_group(GROUPS[1], 10, fake_alive))
+    assert app.skip_dead_site_leads() == 1
+    assert [r["name"] for r in store.by_status("skipped")] == [lead["name"]]
+    assert app.skip_dead_site_leads() == 0
+
+
+def test_site_is_alive_falls_back_on_certificate(monkeypatch):
+    import ssl
+    import urllib.request
+    from lsbot import finder
+    calls = []
+
+    class Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    def fake_open(req, timeout=0, context=None):
+        calls.append((req.full_url, context is not None))
+        if context is None:
+            raise urllib.error.URLError(ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED"))
+        return Resp()
+    monkeypatch.setattr(urllib.request, "urlopen", fake_open)
+    assert finder.site_is_alive("salon-roza.ru")
+    assert calls == [("https://salon-roza.ru", False), ("https://salon-roza.ru", True)]
