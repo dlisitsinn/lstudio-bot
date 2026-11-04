@@ -267,7 +267,8 @@ class Store:
             cur = self.conn.execute(
                 "UPDATE leads SET note=NULL WHERE status IN ('manual','approved','failed') "
                 "AND (note LIKE 'не отправилось: Окно ВК%' OR note LIKE 'не отправилось: Ошибка окна ВК%' "
-                "OR note LIKE 'не отправилось: ВК слишком долго%')")
+                "OR note LIKE 'не отправилось: ВК слишком долго%' OR note LIKE 'не отправилось: Текст вставлен%' "
+                "OR note LIKE 'не отправилось: Не нашла поле%')")
             self.conn.commit()
             return cur.rowcount
 
