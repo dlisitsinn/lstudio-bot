@@ -28,6 +28,9 @@ def reachable(lead) -> bool:
     return has_vk(lead) or bool(lead.get("email"))
 
 
+WINDOW_LOST = ("Окно ВК не готово", "Ошибка окна ВК", "слишком долго не отвечает", "Окно ВК закрыто")
+
+
 class App:
     def __init__(self, cfg, store, vk_finder, osm_finder, drafter, sender_factory, mail_check=None,
                  check_alive=site_is_alive, vkb=None):
@@ -53,7 +56,7 @@ class App:
             vkb = VKBrowser(Path(__file__).resolve().parent.parent / "data" / "vk-browser", notify=self.notify)
         self.vkb = vkb
         self.batch = {"running": False, "total": 0, "done": 0, "sent": 0, "closed": 0, "errors": 0,
-                      "current": "", "captcha": False}
+                      "already": 0, "window_lost": False, "current": "", "captcha": False}
         self._batch_stop = threading.Event()
         self._batch_resume = threading.Event()
         self.batch_pause = (3, 6)    # пауза между сообщениями, секунд
@@ -355,12 +358,18 @@ class App:
         text = (text or "").strip()
         if not text:
             return {"error": "Текст сообщения пустой"}
+        if self.store.vk_already_sent(r["vk_group_id"], r["screen_name"], r["id"]):
+            # этому сообществу бот уже писал (в том числе из другой карточки) — второй раз не пишем
+            self.store.set_status(r["id"], "contacted", "уже писали раньше")
+            return {"ok": True, "already": True, "sent_today": self.store.vk_sent_today()}
+        name = (r["name"] or "").strip()
+        marker = f"«{name}»" if name and f"«{name}»" in text else ""
         with self._vk_lock:
             wait = 1.5 - (time.monotonic() - self._vk_last_send)   # защита от двойного нажатия
             if wait > 0:
                 self._sleep(wait)
             try:
-                res = self.vkb.send(target, text)
+                res = self.vkb.send(target, text, marker=marker)
             finally:
                 self._vk_last_send = time.monotonic()
         if res.get("gid") and not r["vk_group_id"]:
@@ -368,9 +377,12 @@ class App:
                 self.store.update_fields(r["id"], vk_group_id=int(res["gid"]))
             except (ValueError, TypeError):
                 pass
+        if res.get("ok") and res.get("already"):     # в диалоге уже есть наше сообщение
+            self.store.set_status(r["id"], "contacted", "уже писали раньше (нашла в диалоге)")
+            return {"ok": True, "already": True, "sent_today": self.store.vk_sent_today()}
         if res.get("ok"):
             self.store.set_status(r["id"], "contacted", "написали во ВК")
-            self.store.log_send(r["id"], f"vk:{target}", True)
+            self.store.log_send(r["id"], f"vk:{res.get('gid') or target}", True)
             return {"ok": True, "sent_today": self.store.vk_sent_today()}
         if res.get("closed"):
             self.store.update_fields(r["id"], note="сообщения сообщества закрыты")
@@ -396,7 +408,7 @@ class App:
         texts = {int(k): v for k, v in (texts or {}).items() if v and v.strip()}
         self._batch_stop.clear()
         self.batch = {"running": True, "total": len(rows), "done": 0, "sent": 0, "closed": 0, "errors": 0,
-                      "current": "", "captcha": False}
+                      "already": 0, "window_lost": False, "current": "", "captcha": False}
         threading.Thread(target=self._run_batch, args=(rows, texts), daemon=True).start()
         return {"ok": True, "total": len(rows)}
 
@@ -419,6 +431,9 @@ class App:
                 text = texts.get(r["id"]) or self.drafter.vk(r)
                 while True:
                     res = self.send_vk_browser(r["id"], text)
+                    if res.get("ok") and res.get("already"):
+                        b["already"] += 1
+                        break
                     if res.get("ok"):
                         b["sent"] += 1
                         break
@@ -435,7 +450,12 @@ class App:
                             break
                         continue
                     b["errors"] += 1
-                    self.store.update_fields(r["id"], note="не отправилось: " + (res.get("error") or "")[:120])
+                    err = res.get("error") or ""
+                    self.store.update_fields(r["id"], note="не отправилось: " + err[:120])
+                    if any(m in err for m in WINDOW_LOST):
+                        # окно ВК закрыли или оно зависло — дальше не идём, чтобы не копить ошибки
+                        b["window_lost"] = True
+                        self._batch_stop.set()
                     break
                 b["done"] = i + 1
                 if self._batch_stop.is_set() or "лимит" in str(res.get("error", "")):
@@ -447,11 +467,15 @@ class App:
                     self._batch_stop.wait(random.uniform(*self.batch_pause))
         finally:
             msg = f"📨 ВК: отправлено {b['sent']} из {b['total']}"
+            if b.get("already"):
+                msg += f", {b['already']} уже получали сообщение раньше (не писала повторно)"
             if b["closed"]:
                 msg += f", у {b['closed']} закрыты сообщения (пропущены)"
             if b["errors"]:
                 msg += f", не отправилось {b['errors']}"
-            if self._batch_stop.is_set():
+            if b.get("window_lost"):
+                msg += " — окно ВК закрылось, отправку остановила. Неотправленные остались в очереди"
+            elif self._batch_stop.is_set():
                 msg += " — остановлено вами"
             self.notify(msg)
             b["running"] = False

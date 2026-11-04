@@ -220,6 +220,36 @@ class Store:
                 (lead_id, email, 1 if ok else 0, error, _now()))
             self.conn.commit()
 
+    def vk_already_sent(self, group_id, screen, lead_id=None) -> bool:
+        """Уже писали этому сообществу во ВК? Смотрим журнал отправок и другие карточки той же группы."""
+        keys = [f"vk:{v}" for v in (group_id, screen) if v]
+        with self.lock:
+            if keys:
+                marks = ",".join("?" * len(keys))
+                if self.conn.execute(f"SELECT 1 FROM send_log WHERE ok=1 AND email IN ({marks}) LIMIT 1",
+                                     keys).fetchone():
+                    return True
+            conds, params = [], []
+            if group_id:
+                conds.append("vk_group_id=?"); params.append(group_id)
+            if screen:
+                conds.append("LOWER(screen_name)=LOWER(?)"); params.append(screen)
+            if not conds:
+                return False
+            sql = (f"SELECT 1 FROM leads WHERE ({' OR '.join(conds)}) AND id<>? "
+                   "AND status='contacted' AND note LIKE '%ВК%' LIMIT 1")
+            return bool(self.conn.execute(sql, params + [lead_id or 0]).fetchone())
+
+    def restore_window_failures(self) -> int:
+        """Карточки, которые не ушли из-за закрытого окна ВК, — обратно в обычную очередь «написать»."""
+        with self.lock:
+            cur = self.conn.execute(
+                "UPDATE leads SET note=NULL WHERE status IN ('manual','approved','failed') "
+                "AND (note LIKE 'не отправилось: Окно ВК%' OR note LIKE 'не отправилось: Ошибка окна ВК%' "
+                "OR note LIKE 'не отправилось: ВК слишком долго%')")
+            self.conn.commit()
+            return cur.rowcount
+
     def sent_today(self) -> int:
         """Писем на почту сегодня."""
         with self.lock:

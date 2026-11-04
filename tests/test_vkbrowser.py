@@ -56,6 +56,8 @@ class FakeVK(BaseHTTPRequestHandler):
             return self._html("Сообщество ограничило круг лиц, которые могут написать")
         if u.path == "/im" and sel == "-555":
             return self._html('<img src="/captcha.php?sid=1" width=130 height=50>')
+        if u.path == "/im" and sel == "-444":     # в диалоге уже есть наше сообщение
+            return self._html('<div class="msg">Здравствуйте! Заметил, что у «Ромашка» пока нет сайта</div>' + BOX)
         if u.path == "/im":
             return self._html(BOX)
         if u.path == "/lavanda74":   # как настоящая группа: кнопка открывает чат в другой вкладке, есть поле комментария
@@ -111,6 +113,11 @@ def test_browser_flow(fake_vk, tmp_path):
         assert "-777" in STATE["sent"][-1]["peer"]
         assert not any(x["peer"] == "COMMENT" for x in STATE["sent"])     # в комментарий не написано
 
+        sent_before = len(STATE["sent"])
+        r = b.send("444", "Здравствуйте! Заметил, что у «Ромашка» пока нет сайта", marker="«Ромашка»")
+        assert r.get("ok") and r.get("already"), r                         # уже писали — второй раз нет
+        r = b.send("123", "Привет, «Ромашка»", marker="«Ромашка»")         # в другом диалоге — пишем
+        assert r.get("ok") and not r.get("already"), r
         sent_before = len(STATE["sent"])
         t0 = time.monotonic()
         assert b.send("closedgroup", "x").get("closed")                    # сообщения закрыты

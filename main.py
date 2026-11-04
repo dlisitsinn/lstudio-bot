@@ -68,6 +68,10 @@ def run(cfg, open_browser=True):
         moved = app.skip_dead_site_leads()
         if moved:
             app.notify(f"🧹 Убрала из очереди {moved} организаций, у которых указан сайт (они в «Пропущенных»)")
+    back = store.restore_window_failures()
+    if back:
+        app.notify(f"↩️ {back} сообщений не ушли, потому что окно ВК закрылось, — они снова в очереди. "
+                   "Тем, кому сообщение всё-таки дошло, бот второй раз не напишет")
     threading.Thread(target=app.check_vk_messages, daemon=True).start()
     print("🤖 Бот LStudio запущен.")
     print(f"   Окно управления: {url}  (откроется в браузере само)")

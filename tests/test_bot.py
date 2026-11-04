@@ -879,8 +879,12 @@ class FakeVKB:
     def status(self):
         return {"state": self.state, "message": ""}
 
-    def send(self, target, text):
+    def send(self, target, text, marker=""):
         outcome = self.plan.pop(0) if self.plan else "ok"
+        if outcome == "already":
+            return {"ok": True, "already": True}
+        if outcome == "lost":
+            return {"error": "Окно ВК не готово: Окно ВК закрыто"}
         if outcome == "ok":
             self.sent.append((str(target), text))
             return {"ok": True}
@@ -956,6 +960,39 @@ def test_batch_captcha_pause_resume_stop_and_limit():
     assert app3.batch["sent"] < 10 and "остановлено" in app3.state()["log"][0]["text"]
     app3.vkb.state = "login"
     assert "войдите" in app3.start_vk_batch(ids3)["error"]
+
+
+def test_batch_stops_when_window_closed_and_keeps_rest():
+    app, store, ids = batch_app(n=10, plan=["ok", "ok", "lost", "lost", "lost"])
+    app.start_vk_batch(ids)
+    _wait_batch(app)
+    b = app.state()["batch"]
+    assert b["sent"] == 2 and b["errors"] == 1 and b["done"] == 3        # после закрытия окна сразу стоп
+    assert "окно ВК закрылось" in app.state()["log"][0]["text"]
+    left = [r for r in store.by_status("manual")]
+    assert len(left) == 8                                                # неотправленные остались в очереди
+    assert store.vk_sent_today() == 2
+    assert store.restore_window_failures() == 1                          # при запуске заметка снимается
+    assert all(not r["note"] for r in store.by_status("manual"))
+
+
+def test_never_writes_twice_to_same_group():
+    app, store, ids = batch_app(n=3)
+    app.start_vk_batch(ids[:1]); _wait_batch(app)
+    assert len(app.vkb.sent) == 1
+    assert not store.add_lead({"uid": "dup:1", "source": "2gis", "name": "Орг 0 копия", "vk_group_id": 100})
+    # карточку вернули в очередь вручную, а сообщение этой группе уже ушло — журнал не даст написать снова
+    store.set_status(ids[0], "manual")
+    dup = ids[0]
+    r = app.send_vk_browser(dup, "текст")
+    assert r["ok"] and r["already"] and len(app.vkb.sent) == 1           # повторно не отправлено
+    assert store.get(dup)["status"] == "contacted" and store.vk_sent_today() == 1
+    # в диалоге уже есть наше сообщение (журнала нет — например, окно закрылось на отправке)
+    app.vkb.plan = ["already"]
+    app.start_vk_batch(ids[1:2]); _wait_batch(app)
+    assert app.batch["already"] == 1 and app.batch["sent"] == 0 and len(app.vkb.sent) == 1
+    assert store.get(ids[1])["status"] == "contacted" and "уже писали" in store.get(ids[1])["note"]
+    assert "уже получали" in app.state()["log"][0]["text"]
 
 
 def test_settings_migration(tmp_path):

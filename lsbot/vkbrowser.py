@@ -5,6 +5,7 @@
 Сам по себе модуль ничего не отправляет: каждый вызов send() — это одно нажатие пользователя.
 """
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -57,12 +58,13 @@ class VKBrowser:
     def status(self) -> dict:
         return {"state": self.state, "message": self.message}
 
-    def send(self, target: str, text: str, timeout: float = 60) -> dict:
-        """Отправить одно сообщение. target — ID сообщества (число) или короткий адрес."""
+    def send(self, target: str, text: str, timeout: float = 60, marker: str = "") -> dict:
+        """Отправить одно сообщение. target — ID сообщества (число) или короткий адрес.
+        marker — кусок текста (например «Название»): если он уже есть в диалоге, второй раз не пишем."""
         if self.state != "ready":
             return {"error": "Окно ВК не готово: " + (self.message or "нажмите «Включить отправку клавишей»")}
         done = queue.Queue()
-        self._tasks.put(("send", (target, text), done))
+        self._tasks.put(("send", (target, text, marker), done))
         try:
             return done.get(timeout=timeout)
         except queue.Empty:
@@ -228,7 +230,23 @@ class VKBrowser:
                 return m.group(1)
         return None
 
-    def _send(self, target, text):
+    def _dialog_has(self, marker: str, box=None) -> bool:
+        """Есть ли в открытом диалоге наше прошлое сообщение (ищем кусок текста с названием)."""
+        if not marker:
+            return False
+        try:
+            self._page.wait_for_timeout(700)            # даём подгрузиться истории переписки
+            body = self._page.inner_text("body", timeout=2000) or ""
+            draft = (box.inner_text(timeout=1000) or "") if box is not None else ""
+        except Exception:
+            return False
+        norm = lambda t: re.sub(r"\s+", " ", t.replace("\u00a0", " ")).strip().lower()
+        body, draft = norm(body), norm(draft)
+        if draft:                                     # неотправленный черновик в поле ввода не считается
+            body = body.replace(draft, " ", 1)
+        return norm(marker) in body
+
+    def _send(self, target, text, marker=""):
         self._check_login()
         if self.state != "ready":
             return {"error": self.message}
@@ -248,7 +266,16 @@ class VKBrowser:
         if "/im" not in self._page.url:
             # защита: печатаем только в мессенджере, никогда — в комментарии на странице
             return {"error": "Открылся не диалог, а другая страница — ничего не отправила", "gid": gid}
+        if self._dialog_has(marker, box):
+            # в этом диалоге наше сообщение уже есть — второй раз не пишем
+            return {"ok": True, "already": True, "gid": gid}
         box.click()
+        try:                                          # убрать черновик, оставшийся от прошлой попытки
+            if (box.inner_text(timeout=500) or "").strip():
+                self._page.keyboard.press("Control+A")
+                self._page.keyboard.press("Delete")
+        except Exception:
+            pass
         lines = text.replace("\r\n", "\n").split("\n")
         for i, line in enumerate(lines):
             if line:
