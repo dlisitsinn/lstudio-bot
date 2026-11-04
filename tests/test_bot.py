@@ -1007,6 +1007,15 @@ def test_niche_only_filters_queue_and_batch():
     assert store.count_by_status()["manual"] == 3
 
 
+def test_failed_sends_go_to_skipped():
+    app, store, ids = batch_app(n=4, plan=["ok", "err", "ok", "ok"])
+    app.start_vk_batch(ids); _wait_batch(app)
+    assert store.get(ids[1])["status"] == "skipped" and "не отправилось" in store.get(ids[1])["note"]
+    assert app.batch["sent"] == 3
+    store.set_status(ids[1], "manual")                                   # старая неотправленная в очереди
+    assert store.skip_failed_sends() == 1 and store.get(ids[1])["status"] == "skipped"
+
+
 def test_never_writes_twice_to_same_group():
     app, store, ids = batch_app(n=3)
     app.start_vk_batch(ids[:1]); _wait_batch(app)

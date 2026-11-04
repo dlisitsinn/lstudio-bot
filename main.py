@@ -78,6 +78,9 @@ def run(cfg, open_browser=True):
     if back:
         app.notify(f"↩️ {back} сообщений не ушли, потому что окно ВК закрылось, — они снова в очереди. "
                    "Тем, кому сообщение всё-таки дошло, бот второй раз не напишет")
+    gone = store.skip_failed_sends()
+    if gone:
+        app.notify(f"🧹 {gone} карточек, которым сообщение не отправилось, убрала в «Пропущенные»")
     threading.Thread(target=app.check_vk_messages, daemon=True).start()
     print("🤖 Бот LStudio запущен.")
     print(f"   Окно управления: {url}  (откроется в браузере само)")

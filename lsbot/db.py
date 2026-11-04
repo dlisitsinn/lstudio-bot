@@ -252,6 +252,15 @@ class Store:
             self.conn.commit()
             return cur.rowcount
 
+    def skip_failed_sends(self) -> int:
+        """Карточки из очереди ВК, которые уже не отправились, — в «Пропущенные»."""
+        with self.lock:
+            cur = self.conn.execute(
+                "UPDATE leads SET status='skipped' WHERE status IN ('manual','approved','failed') "
+                "AND note LIKE 'не отправилось:%'")
+            self.conn.commit()
+            return cur.rowcount
+
     def restore_window_failures(self) -> int:
         """Карточки, которые не ушли из-за закрытого окна ВК, — обратно в обычную очередь «написать»."""
         with self.lock:

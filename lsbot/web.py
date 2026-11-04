@@ -478,11 +478,14 @@ class App:
                         continue
                     b["errors"] += 1
                     err = res.get("error") or ""
-                    self.store.update_fields(r["id"], note="не отправилось: " + err[:120])
                     if any(m in err for m in WINDOW_LOST):
-                        # окно ВК закрыли или оно зависло — дальше не идём, чтобы не копить ошибки
+                        # окно ВК закрыли или оно зависло — карточка не виновата, оставляем в очереди и стоп
+                        self.store.update_fields(r["id"], note="не отправилось: " + err[:120])
                         b["window_lost"] = True
                         self._batch_stop.set()
+                    else:
+                        # не отправилось по вине группы/страницы — убираем в «Пропущенные», чтобы не мешалась
+                        self.store.set_status(r["id"], "skipped", "не отправилось: " + err[:120])
                     break
                 b["done"] = i + 1
                 if self._batch_stop.is_set() or "лимит" in str(res.get("error", "")):
