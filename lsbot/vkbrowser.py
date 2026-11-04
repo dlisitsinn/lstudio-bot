@@ -230,6 +230,17 @@ class VKBrowser:
                 return m.group(1)
         return None
 
+    def _needs_login(self) -> bool:
+        """ВК выкинул на страницу входа (сменили пароль, вышли из аккаунта)."""
+        try:
+            url = self._page.url or ""
+            if "/login" in url or "id.vk." in url or "oauth.vk" in url:
+                return True
+            pw = self._page.locator('input[type="password"], input[name="login"], input[name="phone"]')
+            return bool(pw.count() and pw.first.is_visible())
+        except Exception:
+            return False
+
     def _dialog_has(self, marker: str, box=None) -> bool:
         """Есть ли в открытом диалоге наше прошлое сообщение (ищем кусок текста с названием)."""
         if not marker:
@@ -258,11 +269,20 @@ class VKBrowser:
                     "closed": True}
         base = self._base_for_cookies() if self.base in (VK_BASE, "https://vk.ru") else self.base
         self._page.goto(f"{base}/im?sel=-{gid}", wait_until="domcontentloaded")
+        if self._needs_login():
+            self._set("login", "ВК просит войти заново — войдите в окне браузера, бот подождёт")
+            return {"error": "Окно ВК не готово: ВК просит войти заново (например, после смены пароля)"}
         box = self._find_input()
         if box == "captcha":
             return {"error": "ВК показал капчу — решите её в окне браузера и нажмите пробел ещё раз", "gid": gid}
-        if box == "closed" or box is None:
+        if box == "closed":
             return {"error": "У сообщества закрыты сообщения", "closed": True, "gid": gid}
+        if box is None:
+            if self._needs_login():
+                self._set("login", "ВК просит войти заново — войдите в окне браузера, бот подождёт")
+                return {"error": "Окно ВК не готово: ВК просит войти заново (например, после смены пароля)"}
+            # поле не нашлось, но и «закрыто» не написано — не пропускаем карточку, оставляем в очереди
+            return {"error": "Не нашла поле для сообщения — карточка осталась в очереди", "gid": gid}
         if "/im" not in self._page.url:
             # защита: печатаем только в мессенджере, никогда — в комментарии на странице
             return {"error": "Открылся не диалог, а другая страница — ничего не отправила", "gid": gid}

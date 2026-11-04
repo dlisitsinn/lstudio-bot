@@ -56,6 +56,8 @@ class FakeVK(BaseHTTPRequestHandler):
             return self._html("Сообщество ограничило круг лиц, которые могут написать")
         if u.path == "/im" and sel == "-555":
             return self._html('<img src="/captcha.php?sid=1" width=130 height=50>')
+        if u.path == "/im" and sel == "-888":     # ВК выкинул на вход (сменили пароль)
+            return self._html('Войти во ВКонтакте <input type="password" name="pass">')
         if u.path == "/im" and sel == "-444":     # в диалоге уже есть наше сообщение
             return self._html('<div class="msg">Здравствуйте! Заметил, что у «Ромашка» пока нет сайта</div>' + BOX)
         if u.path == "/im":
@@ -118,6 +120,9 @@ def test_browser_flow(fake_vk, tmp_path):
         assert r.get("ok") and r.get("already"), r                         # уже писали — второй раз нет
         r = b.send("123", "Привет, «Ромашка»", marker="«Ромашка»")         # в другом диалоге — пишем
         assert r.get("ok") and not r.get("already"), r
+        r = b.send("888", "x")
+        assert not r.get("closed") and "войти заново" in r["error"], r     # не «закрыто», а просьба войти
+        STATE["logged_in"] = True; b._set("ready")
         sent_before = len(STATE["sent"])
         t0 = time.monotonic()
         assert b.send("closedgroup", "x").get("closed")                    # сообщения закрыты
