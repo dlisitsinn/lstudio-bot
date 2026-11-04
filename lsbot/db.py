@@ -240,6 +240,18 @@ class Store:
                    "AND status='contacted' AND note LIKE '%ВК%' LIMIT 1")
             return bool(self.conn.execute(sql, params + [lead_id or 0]).fetchone())
 
+    def restore_closed_skips(self) -> int:
+        """Вернуть в очередь карточки, пропущенные как «сообщения закрыты».
+        Когда ВК выкидывал на страницу входа, бот ошибочно считал группы закрытыми.
+        Действительно закрытые при отправке снова определятся и тихо пропустятся."""
+        with self.lock:
+            cur = self.conn.execute(
+                "UPDATE leads SET status='manual', note=NULL WHERE status='skipped' "
+                "AND note='сообщения сообщества закрыты' "
+                "AND id NOT IN (SELECT lead_id FROM send_log WHERE ok=1 AND lead_id IS NOT NULL)")
+            self.conn.commit()
+            return cur.rowcount
+
     def restore_window_failures(self) -> int:
         """Карточки, которые не ушли из-за закрытого окна ВК, — обратно в обычную очередь «написать»."""
         with self.lock:

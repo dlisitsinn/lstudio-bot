@@ -976,6 +976,17 @@ def test_batch_stops_when_window_closed_and_keeps_rest():
     assert all(not r["note"] for r in store.by_status("manual"))
 
 
+def test_restore_closed_skips(tmp_path):
+    from lsbot import migrations
+    app, store, ids = batch_app(n=4, plan=["ok", "closed", "closed", "closed"])
+    app.start_vk_batch(ids); _wait_batch(app)
+    assert store.count_by_status().get("skipped") == 3
+    store.set_status(ids[0], "skipped", "сообщения сообщества закрыты")   # этой уже писали — не возвращаем
+    assert store.restore_closed_skips() == 3
+    assert store.get(ids[0])["status"] == "skipped" and store.get(ids[1])["status"] == "manual"
+    assert migrations.once(tmp_path, "x") and not migrations.once(tmp_path, "x")
+
+
 def test_never_writes_twice_to_same_group():
     app, store, ids = batch_app(n=3)
     app.start_vk_batch(ids[:1]); _wait_batch(app)

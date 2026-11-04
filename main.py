@@ -68,6 +68,12 @@ def run(cfg, open_browser=True):
         moved = app.skip_dead_site_leads()
         if moved:
             app.notify(f"🧹 Убрала из очереди {moved} организаций, у которых указан сайт (они в «Пропущенных»)")
+    from lsbot import migrations as _mig
+    if _mig.once(BASE_DIR, "restore_closed_skips_after_logout"):
+        back_closed = store.restore_closed_skips()
+        if back_closed:
+            app.notify(f"↩️ Вернула в очередь {back_closed} карточек, которые бот по ошибке пропустил как "
+                       "«сообщения закрыты» (ВК тогда просил войти заново). Действительно закрытые он снова пропустит сам")
     back = store.restore_window_failures()
     if back:
         app.notify(f"↩️ {back} сообщений не ушли, потому что окно ВК закрылось, — они снова в очереди. "
