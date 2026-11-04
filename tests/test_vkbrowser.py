@@ -56,6 +56,8 @@ class FakeVK(BaseHTTPRequestHandler):
             return self._html("Сообщество ограничило круг лиц, которые могут написать")
         if u.path == "/im" and sel == "-555":
             return self._html('<img src="/captcha.php?sid=1" width=130 height=50>')
+        if u.path == "/im" and sel == "-152":     # как на скрине: «Сообщество отключило сообщения.»
+            return self._html('<div>Здесь будет история переписки</div><div>Сообщество отключило сообщения.</div>')
         if u.path == "/im" and sel == "-888":     # ВК выкинул на вход (сменили пароль)
             return self._html('Войти во ВКонтакте <input type="password" name="pass">')
         if u.path == "/im" and sel == "-444":     # в диалоге уже есть наше сообщение
@@ -124,6 +126,8 @@ def test_browser_flow(fake_vk, tmp_path):
         t0 = time.monotonic()
         assert b.send("closedgroup", "x").get("closed")                    # сообщения закрыты
         assert time.monotonic() - t0 < 5                                   # распознано быстро
+        r = b.send("152", "x")
+        assert r.get("closed"), r                                          # «отключило сообщения» = закрыто
         r = b.send("555", "x")
         assert "капчу" in r["error"]
         assert len(STATE["sent"]) == sent_before                           # ничего лишнего не ушло
