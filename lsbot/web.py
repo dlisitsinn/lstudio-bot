@@ -1,4 +1,5 @@
 """Окно управления: маленький веб-сервер на вашем компьютере (только для вас, адрес 127.0.0.1)."""
+import re
 import json
 import random
 import threading
@@ -26,6 +27,24 @@ def has_vk(lead) -> bool:
 def reachable(lead) -> bool:
     """Есть куда написать: группа ВК или почта."""
     return has_vk(lead) or bool(lead.get("email"))
+
+
+NICHE_EXCLUDE = ("банк", "банкет", "бандаж", "бантик", "баннер", "бандероль")
+
+
+def niche_match(row, words) -> bool:
+    """Подходит ли организация под выбранные ниши: ищем слова в названии, виде деятельности, запросе, описании."""
+    if not words:
+        return True
+    text = " ".join(str(row[k] or "") for k in ("name", "activity", "query", "info")).lower().replace("ё", "е")
+    for w in words:
+        w = w.replace("ё", "е")
+        pat = r"[а-яa-z]*[\s-]+".join(re.escape(part) for part in w.split())   # «баз отдых» → «базы отдыха»
+        for m in re.finditer(r"(?<![а-яa-z])" + pat, text):
+            tail = text[m.start():m.start() + 12]
+            if not tail.startswith(NICHE_EXCLUDE):
+                return True
+    return False
 
 
 WINDOW_LOST = ("Окно ВК не готово", "Ошибка окна ВК", "слишком долго не отвечает", "Окно ВК закрыто")
@@ -129,14 +148,21 @@ class App:
             leads[status] = [row_to_dict(r) for r in self.store.by_status(status)]
             if status in ("sent", "contacted", "skipped"):
                 leads[status] = leads[status][::-1][:200]
-        manual_queue = []
-        for r in self.store.by_status("manual", limit=100):
-            d = row_to_dict(r)
-            d["vk_text"] = self.drafter.vk(r)
-            manual_queue.append(d)
+        manual_queue, niche_total = [], 0
+        words = self.cfg.niche_only
+        for r in self.store.by_status("manual", limit=None if words else 100):
+            if not niche_match(r, words):
+                continue
+            niche_total += 1
+            if len(manual_queue) < 100:
+                d = row_to_dict(r)
+                d["vk_text"] = self.drafter.vk(r)
+                manual_queue.append(d)
         return {
             "leads": leads,
             "manual_queue": manual_queue,
+            "manual_niche_total": niche_total,
+            "niche_only": list(words),
             "vk_sent_today": self.store.vk_sent_today(),
             "vk_daily_limit": self.cfg.vk_daily_limit,
             "counts": self.store.count_by_status(),
@@ -398,7 +424,8 @@ class App:
             return {"error": "Сначала включите отправку и войдите во ВК в окне браузера"}
         ids = [int(i) for i in (ids or [])][: self.BATCH_MAX]
         rows = [r for r in (self.store.get(i) for i in ids)
-                if r and r["status"] in ("manual", "new", "approved", "failed") and (r["vk_group_id"] or r["screen_name"])]
+                if r and r["status"] in ("manual", "new", "approved", "failed") and (r["vk_group_id"] or r["screen_name"])
+                and niche_match(r, self.cfg.niche_only)]
         if not rows:
             return {"error": "Отметьте карточки, которым писать"}
         left = self.cfg.vk_daily_limit - self.store.vk_sent_today()

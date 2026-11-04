@@ -44,6 +44,7 @@ class Config:
     skip_dead_sites: bool = True
     auto_queue: bool = True
     vk_group_token: str = ""
+    niche_only: tuple = ()          # писать только этим нишам (слова через запятую в NICHE_ONLY)
 
     def email_ready(self) -> bool:
         return bool(self.smtp_host and self.smtp_user and self.smtp_password)
@@ -87,6 +88,7 @@ def load_config(env_path: Path = None) -> Config:
         auto_queue=get("AUTO_QUEUE", "да").strip().lower() not in ("нет", "no", "0", "false"),
         skip_dead_sites=get("SKIP_DEAD_SITES", "да").strip().lower() not in ("нет", "no", "0", "false"),
         vk_group_token=_vk_token(get("VK_GROUP_TOKEN")),
+        niche_only=tuple(w.strip().lower() for w in get("NICHE_ONLY").split(",") if w.strip()),
         email_delay_min=_int(get("EMAIL_DELAY_MIN"), 60),
         email_delay_max=_int(get("EMAIL_DELAY_MAX"), 150),
         min_members=_int(get("MIN_MEMBERS"), 30),

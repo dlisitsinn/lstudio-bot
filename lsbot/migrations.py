@@ -9,6 +9,8 @@ SETTINGS = [
     ("skip_dead_sites", "SKIP_DEAD_SITES", "да", True),
     ("vk_group_token_line", "VK_GROUP_TOKEN", "", True),
     ("auto_queue", "AUTO_QUEUE", "да", True),
+    ("niche_only_resort", "NICHE_ONLY", "бан,саун,хамам,баз отдых,база отдых,турбаз,гостев,коттедж,глэмпинг,"
+     "глемпинг,кемпинг,дом отдых,загородн,усадьб,экоотел,эко-отел,шале,барнхаус,посуточ,отдых,чан", True),
 ]
 
 

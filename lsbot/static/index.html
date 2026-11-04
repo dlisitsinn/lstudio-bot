@@ -332,7 +332,7 @@ function renderTab(){
       ${vkbPanel()}
       <div class="sendbox">
         <div class="meter">Сегодня во ВК: ${S.vk_sent_today} из ${S.vk_daily_limit}<div class="track"><div class="fill" style="width:${Math.min(100,S.vk_sent_today/S.vk_daily_limit*100)}%"></div></div></div>
-        <span class="hint">В очереди ${total}. Лимит — строка VK_DAILY_LIMIT в настройках.</span>
+        <span class="hint">${(S.niche_only||[]).length ? `Показаны только нужные ниши (строка NICHE_ONLY в настройках): ${S.manual_niche_total} из ${total}.` : `В очереди ${total}.`} Лимит — строка VK_DAILY_LIMIT в настройках.</span>
       </div>
       ${Q.length ? '<div class="cards">' + Q.map(l => cardHTML(l, auto, left)).join("") + "</div>" + (total > Q.length ? `<p class="hint" style="margin-top:12px">Показаны первые ${Q.length} из ${total}. Следующие появятся по мере отправки.</p>` : "")
         : '<div class="list"><div class="empty"><b>Здесь пусто</b>Отметьте организации во вкладке «Новые» и нажмите «В очередь на отправку» — те, у кого нет почты, появятся здесь.</div></div>'}`;

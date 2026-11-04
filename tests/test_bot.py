@@ -987,6 +987,26 @@ def test_restore_closed_skips(tmp_path):
     assert migrations.once(tmp_path, "x") and not migrations.once(tmp_path, "x")
 
 
+def test_niche_only_filters_queue_and_batch():
+    from lsbot.web import niche_match
+    words = ("бан", "саун", "баз отдых", "гостев", "коттедж")
+    row = lambda n, a="": {"name": n, "activity": a, "query": "", "info": ""}
+    assert niche_match(row("Баня на дровах"), words) and niche_match(row("Тихое место", "Базы отдыха"), words)
+    assert niche_match(row("Гостевой дом Лесной"), words)
+    assert not niche_match(row("Банкетный зал Пион"), words)          # «банкет» — не баня
+    assert not niche_match(row("Студия маникюра"), words) and not niche_match(row("Двери Мира"), words)
+    assert not niche_match(row("Сбербанк"), words)
+    app, store, ids = batch_app(n=3)
+    store.add_lead({"uid": "r:1", "source": "2gis", "name": "Баня у озера", "vk_group_id": 900})
+    app.action("approve", [store.by_status("new")[0]["id"]])
+    app.cfg.niche_only = words
+    st = app.state()
+    assert [l["name"] for l in st["manual_queue"]] == ["Баня у озера"] and st["manual_niche_total"] == 1
+    app.start_vk_batch([r["id"] for r in store.by_status("manual")]); _wait_batch(app)
+    assert [t for t, _ in app.vkb.sent] == ["900"]                     # маникюр и прочее не тронуты
+    assert store.count_by_status()["manual"] == 3
+
+
 def test_never_writes_twice_to_same_group():
     app, store, ids = batch_app(n=3)
     app.start_vk_batch(ids[:1]); _wait_batch(app)
@@ -1009,7 +1029,9 @@ def test_never_writes_twice_to_same_group():
 def test_settings_migration(tmp_path):
     from lsbot import migrations
     (tmp_path / ".env").write_text("SMTP_USER=a@b.ru\nVK_DAILY_LIMIT=20\n", encoding="utf-8")
-    assert migrations.apply(tmp_path) == ["VK_DAILY_LIMIT=2000", "SKIP_DEAD_SITES=да", "VK_GROUP_TOKEN=", "AUTO_QUEUE=да"]
+    got = migrations.apply(tmp_path)
+    assert got[:4] == ["VK_DAILY_LIMIT=2000", "SKIP_DEAD_SITES=да", "VK_GROUP_TOKEN=", "AUTO_QUEUE=да"]
+    assert got[4].startswith("NICHE_ONLY=бан,")
     assert "VK_DAILY_LIMIT=2000" in (tmp_path / ".env").read_text(encoding="utf-8")
     assert "SMTP_USER=a@b.ru" in (tmp_path / ".env").read_text(encoding="utf-8")
     (tmp_path / ".env").write_text("VK_DAILY_LIMIT=50\n", encoding="utf-8")   # потом поменяли сами
