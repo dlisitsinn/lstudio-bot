@@ -885,6 +885,8 @@ class FakeVKB:
             return {"ok": True, "already": True}
         if outcome == "lost":
             return {"error": "Окно ВК не готово: Окно ВК закрыто"}
+        if outcome == "slow":
+            return {"error": "ВК слишком долго не отвечает. Посмотрите на окно браузера"}
         if outcome == "ok":
             self.sent.append((str(target), text))
             return {"ok": True}
@@ -962,18 +964,36 @@ def test_batch_captcha_pause_resume_stop_and_limit():
     assert "войдите" in app3.start_vk_batch(ids3)["error"]
 
 
-def test_batch_stops_when_window_closed_and_keeps_rest():
-    app, store, ids = batch_app(n=10, plan=["ok", "ok", "lost", "lost", "lost"])
-    app.start_vk_batch(ids)
-    _wait_batch(app)
+def test_batch_reopens_window_and_continues():
+    app, store, ids = batch_app(n=6, plan=["ok", "ok", "lost", "ok", "ok", "ok", "ok"])
+    app.recover_wait = 1
+    app.start_vk_batch(ids); _wait_batch(app)
     b = app.state()["batch"]
-    assert b["sent"] == 2 and b["errors"] == 1 and b["done"] == 3        # после закрытия окна сразу стоп
+    assert b["sent"] == 6 and b["errors"] == 0                          # окно открылось заново — дописал всем
+    assert any("открываю заново" in l["text"] for l in app.state()["log"])
+
+
+def test_batch_stops_when_window_closed_and_keeps_rest():
+    app, store, ids = batch_app(n=10, plan=["ok", "ok"] + ["lost"] * 10)
+    app.recover_wait = 0.2
+    real_open = app.vkb.open
+    app.vkb.open = lambda: setattr(app.vkb, "state", "off")           # окно не открывается
+    app.start_vk_batch(ids)
+    _wait_batch(app, timeout=10)
+    b = app.state()["batch"]
+    assert b["sent"] == 2 and b["errors"] == 1 and b["done"] == 3        # окно не вернулось — стоп
     assert "окно ВК закрылось" in app.state()["log"][0]["text"]
     left = [r for r in store.by_status("manual")]
     assert len(left) == 8                                                # неотправленные остались в очереди
     assert store.vk_sent_today() == 2
     assert store.restore_window_failures() == 1                          # при запуске заметка снимается
     assert all(not r["note"] for r in store.by_status("manual"))
+
+
+def test_batch_transient_errors_continue():
+    app, store, ids = batch_app(n=4, plan=["ok", "slow", "ok", "ok"])
+    app.start_vk_batch(ids); _wait_batch(app)
+    assert app.batch["sent"] == 3 and store.get(ids[1])["status"] == "manual"   # разовый сбой — в очереди, идём дальше
 
 
 def test_restore_closed_skips(tmp_path):

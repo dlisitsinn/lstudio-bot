@@ -47,7 +47,11 @@ def niche_match(row, words) -> bool:
     return False
 
 
-WINDOW_LOST = ("Окно ВК не готово", "Ошибка окна ВК", "слишком долго не отвечает", "Окно ВК закрыто")
+# окно ВК закрылось/вылетело или ВК разлогинил — пробуем открыть заново
+WINDOW_GONE = ("Окно ВК не готово", "Окно ВК закрыто", "has been closed", "Target closed", "Browser closed")
+# разовый сбой (долго грузилось, страница дёрнулась) — карточку оставляем в очереди и идём дальше
+TRANSIENT = ("слишком долго не отвечает", "Ошибка окна ВК")
+WINDOW_LOST = WINDOW_GONE + TRANSIENT       # для совместимости: всё, где карточка не виновата
 
 
 class App:
@@ -448,8 +452,26 @@ class App:
         self._batch_resume.set()
         return {"ok": True}
 
+    recover_wait = 90          # сколько ждать, пока окно ВК откроется заново (секунд)
+
+    def _recover_window(self) -> bool:
+        """Окно ВК пропало посреди рассылки — открываем снова и ждём, пока будет готово."""
+        self.notify("🔄 Окно ВК закрылось или ВК попросил войти — открываю заново и продолжу. "
+                    "Если просит пароль — войдите в окне, бот подождёт")
+        try:
+            self.vkb.open()
+        except Exception:
+            pass
+        end = time.monotonic() + self.recover_wait
+        while time.monotonic() < end and not self._batch_stop.is_set():
+            if self.vkb.state == "ready":
+                return True
+            self._batch_stop.wait(1)
+        return self.vkb.state == "ready"
+
     def _run_batch(self, rows, texts):
         b = self.batch
+        recoveries, transient = 0, 0
         try:
             for i, r in enumerate(rows):
                 if self._batch_stop.is_set():
@@ -476,17 +498,30 @@ class App:
                         if self._batch_stop.is_set():
                             break
                         continue
-                    b["errors"] += 1
                     err = res.get("error") or ""
-                    if any(m in err for m in WINDOW_LOST):
-                        # окно ВК закрыли или оно зависло — карточка не виновата, оставляем в очереди и стоп
+                    if any(m in err for m in WINDOW_GONE) and recoveries < 3 and not self._batch_stop.is_set():
+                        recoveries += 1
+                        if self._recover_window():
+                            continue                       # окно снова готово — повторяем эту же карточку
+                    b["errors"] += 1
+                    if any(m in err for m in WINDOW_GONE):
+                        # окно так и не вернулось — карточка не виновата, оставляем в очереди и стоп
                         self.store.update_fields(r["id"], note="не отправилось: " + err[:120])
                         b["window_lost"] = True
                         self._batch_stop.set()
+                    elif any(m in err for m in TRANSIENT):
+                        # разовый сбой — оставляем в очереди (если всё же ушло, повторно бот не напишет)
+                        self.store.update_fields(r["id"], note="не отправилось: " + err[:120])
+                        transient += 1
+                        if transient >= 5:
+                            b["auto_stop"] = True
+                            self._batch_stop.set()
                     else:
                         # не отправилось по вине группы/страницы — убираем в «Пропущенные», чтобы не мешалась
                         self.store.set_status(r["id"], "skipped", "не отправилось: " + err[:120])
                     break
+                if res.get("ok"):
+                    transient = 0
                 b["done"] = i + 1
                 if self._batch_stop.is_set() or "лимит" in str(res.get("error", "")):
                     break
@@ -505,6 +540,8 @@ class App:
                 msg += f", не отправилось {b['errors']}"
             if b.get("window_lost"):
                 msg += " — окно ВК закрылось, отправку остановила. Неотправленные остались в очереди"
+            elif b.get("auto_stop"):
+                msg += " — ВК пять раз подряд не ответил, остановила. Посмотрите на окно ВК"
             elif self._batch_stop.is_set():
                 msg += " — остановлено вами"
             self.notify(msg)
