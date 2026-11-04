@@ -1031,7 +1031,7 @@ def test_settings_migration(tmp_path):
     (tmp_path / ".env").write_text("SMTP_USER=a@b.ru\nVK_DAILY_LIMIT=20\n", encoding="utf-8")
     got = migrations.apply(tmp_path)
     assert got[:4] == ["VK_DAILY_LIMIT=2000", "SKIP_DEAD_SITES=да", "VK_GROUP_TOKEN=", "AUTO_QUEUE=да"]
-    assert got[4].startswith("NICHE_ONLY=бан,")
+    assert got[4:] == ["NICHE_ONLY="]          # фильтр ниш в итоге выключен
     assert "VK_DAILY_LIMIT=2000" in (tmp_path / ".env").read_text(encoding="utf-8")
     assert "SMTP_USER=a@b.ru" in (tmp_path / ".env").read_text(encoding="utf-8")
     (tmp_path / ".env").write_text("VK_DAILY_LIMIT=50\n", encoding="utf-8")   # потом поменяли сами

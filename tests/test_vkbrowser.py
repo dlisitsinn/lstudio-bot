@@ -120,9 +120,6 @@ def test_browser_flow(fake_vk, tmp_path):
         assert r.get("ok") and r.get("already"), r                         # уже писали — второй раз нет
         r = b.send("123", "Привет, «Ромашка»", marker="«Ромашка»")         # в другом диалоге — пишем
         assert r.get("ok") and not r.get("already"), r
-        r = b.send("888", "x")
-        assert not r.get("closed") and "войти заново" in r["error"], r     # не «закрыто», а просьба войти
-        STATE["logged_in"] = True; b._set("ready")
         sent_before = len(STATE["sent"])
         t0 = time.monotonic()
         assert b.send("closedgroup", "x").get("closed")                    # сообщения закрыты
@@ -130,6 +127,9 @@ def test_browser_flow(fake_vk, tmp_path):
         r = b.send("555", "x")
         assert "капчу" in r["error"]
         assert len(STATE["sent"]) == sent_before                           # ничего лишнего не ушло
+        r = b.send("888", "x")                                             # ВК выкинул на вход (смена пароля)
+        assert not r.get("closed") and "войти заново" in r["error"], r     # не «закрыто», а просьба войти
+        assert b.state == "login"
     finally:
         b.close()
 

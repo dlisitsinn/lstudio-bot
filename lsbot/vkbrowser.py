@@ -170,7 +170,7 @@ class VKBrowser:
     def _check_login(self):
         if self._ctx is None:
             return
-        if self._logged_in():
+        if self._logged_in() and not (self._page is not None and self._needs_login()):
             self._set("ready", "Окно ВК готово. Пробел — отправить, S — пропустить")
         else:
             self._set("login", "Войдите во ВК в открывшемся окне браузера — бот подождёт")
