@@ -236,7 +236,8 @@ class VKBrowser:
             url = self._page.url or ""
             if "/login" in url or "id.vk." in url or "oauth.vk" in url:
                 return True
-            pw = self._page.locator('input[type="password"], input[name="login"], input[name="phone"]')
+            # только видимое поле пароля: поиск, телефон и т.п. в мессенджере за вход не считаем
+            pw = self._page.locator('input[type="password"]')
             return bool(pw.count() and pw.first.is_visible())
         except Exception:
             return False
