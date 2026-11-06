@@ -28,6 +28,14 @@ NOT_A_SITE = (
     "mst.link", "taplink.ws", "yclients.ru", "moiprofi.ru", "arnica.pro", "jivo.chat", "jivosite.com",
     "pulscen.ru", "obiz.ru", "tbookme.ru", "booknow.ru", "beautyagent.ru", "tetradka.io",
     "2gis.com", "flamp.com", "restoclub.ru", "tripadvisor.ru", "orgpage.ru", "spr.ru",
+    # площадки и модули бронирования жилья — это не собственный сайт
+    "sutochno.ru", "tvil.ru", "ostrovok.ru", "101hotels.com", "101hotels.ru", "booking.com", "airbnb.ru",
+    "airbnb.com", "cian.ru", "domclick.ru", "youla.ru", "kvartirka.com", "travel.yandex.ru", "otello.ru",
+    "homereserve.ru", "reservationsteps.ru", "realtycalendar.ru", "bnovo.ru", "travelline.ru",
+    "hotellook.ru", "tripadvisor.com", "russpass.ru", "putevka.com", "kurortexpress.ru", "zabroniryi.ru",
+    "glamping.ru", "bronevik.com", "level.travel", "onlinetours.ru", "tutu.ru",
+    # короткие ссылки и конструкторы-визитки
+    "cutt.ly", "bit.ly", "tinyurl.com", "qr.page", "qrco.de", "vk.link",
 )
 
 URL_RE = re.compile(
@@ -129,6 +137,17 @@ def site_is_alive(url: str, timeout: int = 12) -> bool:
                     continue            # повторим без проверки сертификата
                 break
     return False
+
+
+def explicit_sites(group: dict) -> list:
+    """Только сайт, прямо указанный в поле «Сайт» группы (без ссылок из описания и блока ссылок)."""
+    result = []
+    for url in re.split(r"[\s,]+", group.get("site") or ""):
+        url = url.strip()
+        if url and "@" not in url and not is_social_or_aggregator(url):
+            if _domain(url) not in [_domain(u) for u in result]:
+                result.append(url)
+    return result
 
 
 def analyze_group(group: dict, min_members: int = 0, check_alive=site_is_alive, skip_dead: bool = False):
@@ -326,10 +345,21 @@ def enrich_with_vk(vk_finder, leads, stats):
     for lead in leads:
         g = groups.get((lead.get("screen_name") or "").lower()) or groups.get(str(lead.get("vk_group_id") or ""))
         if g:
-            vk_lead = analyze_group(g, 0, vk_finder.check_alive, getattr(vk_finder, "skip_dead", False))
-            if vk_lead is None:
+            # 2ГИС уже сказал «сайта нет». Верим ему, если в группе нет явного сайта в поле «Сайт»:
+            # ссылки из описания часто ведут на агрегаторы, партнёров или чужие страницы.
+            sites = explicit_sites(g)
+            if sites and (getattr(vk_finder, "skip_dead", False) or
+                          any(vk_finder.check_alive(u) for u in sites)):
                 stats["with_site"] = stats.get("with_site", 0) + 1
                 continue
+            vk_lead = analyze_group(dict(g, site="", links=[], description="", status=""), 0,
+                                    vk_finder.check_alive, False) or {}
+            if not vk_lead.get("email") and g.get("description"):
+                vk_lead["email"] = (extract_emails(g["description"]) or [None])[0]
+            if not vk_lead.get("phone") and g.get("description"):
+                vk_lead["phone"] = (extract_phones(g["description"]) or [None])[0]
+            if g.get("deactivated") or g.get("is_closed", 0) != 0:
+                lead["note"] = "группа ВК закрыта или удалена"
             lead["vk_group_id"] = g["id"]
             lead["screen_name"] = g.get("screen_name") or lead.get("screen_name")
             lead["email"] = lead.get("email") or vk_lead.get("email")
@@ -341,4 +371,4 @@ def enrich_with_vk(vk_finder, leads, stats):
     return result
 
 
-__all__ = ["Finder", "enrich_with_vk", "parse_group_links", "analyze_group", "own_sites", "is_social_or_aggregator", "VKError"]
+__all__ = ["Finder", "enrich_with_vk", "explicit_sites", "parse_group_links", "analyze_group", "own_sites", "is_social_or_aggregator", "VKError"]

@@ -276,8 +276,10 @@ class App:
     def _import(self, leads, stats):
         try:
             no_vk = 0
-            if self.cfg.only_vk:   # нужны организации с группой ВК или почтой
-                no_vk = sum(1 for l in leads if not reachable(l))
+            if self.cfg.only_vk:   # нужны организации с группой ВК или почтой (считаем только тех, кто без сайта)
+                no_vk = sum(1 for l in leads if not reachable(l) and not l.get("_sites"))
+                stats = dict(stats, with_site=stats["with_site"] + sum(
+                    1 for l in leads if not reachable(l) and l.get("_sites")))
                 leads = [l for l in leads if reachable(l)]
             from concurrent.futures import ThreadPoolExecutor
             result, with_site, dead = [], stats["with_site"], 0

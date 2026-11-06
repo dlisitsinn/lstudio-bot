@@ -624,15 +624,21 @@ def test_branches_and_generic_names():
     from lsbot.importer import merge_branches, is_generic
     assert is_generic("Студия маникюра") and is_generic("студия маникюра и педикюра")
     assert not is_generic("Kaif beauty") and not is_generic("Ли-Лак, дом маникюра")
-    header = ["Наименование", "Телефон 1", "E-mail 1", "Веб-сайт 1", "Веб-сайт 2"]
+    header = ["Наименование", "Телефон 1", "E-mail 1", "Веб-сайт 1", "Веб-сайт 2", "Город"]
     rows = [header,
-            ["Kaif beauty", "89056571313", "", "http://kaifbeauty.ru/", ""],
-            ["Kaif beauty", "89056570000", "izabel@mail.ru", "", ""],          # филиал без сайта
-            ["Студия маникюра", "89000000001", "a@mail.ru", "", ""],
-            ["Студия маникюра", "89000000002", "b@mail.ru", "", ""],           # другой мастер
-            ["Ли-Лак", "89518533311", "", "", ""],
-            ["Ли-Лак", "", "lilak@yandex.ru", "", ""],                          # второй филиал с почтой
-            ["Мастер Оля", "89000000003", "", "https://mst.link/olya", "https://n1.yclients.ru/"]]
+            ["Kaif beauty", "89056571313", "", "http://kaifbeauty.ru/", "", "Челябинск"],
+            ["Kaif beauty", "89056570000", "izabel@mail.ru", "", "", "Челябинск"],  # филиал без сайта
+            ["Студия маникюра", "89000000001", "a@mail.ru", "", "", "Челябинск"],
+            ["Студия маникюра", "89000000002", "b@mail.ru", "", "", "Челябинск"],   # другой мастер
+            ["Ли-Лак", "89518533311", "", "", "", "Челябинск"],
+            ["Ли-Лак", "", "lilak@yandex.ru", "", "", "Челябинск"],                  # второй филиал с почтой
+            ["Мастер Оля", "89000000003", "", "https://mst.link/olya", "https://n1.yclients.ru/", ""],
+            # одинаковые названия в разных деревнях с разными телефонами — разные хозяева
+            ["Гостевой дом", "89000000010", "", "http://gd-one.ru", "", ""],
+            ["Гостевой дом", "89000000011", "", "", "", ""],
+            ["Сканди", "89000000020", "", "http://skandi.ru", "", ""],
+            ["Сканди", "89000000021", "", "", "", ""],
+            ["Сканди", "89000000020", "", "", "", ""]]                             # тот же телефон — филиал
     leads, stats = parse_rows(rows, "2gis")
     by = {}
     for l in leads:
@@ -641,7 +647,30 @@ def test_branches_and_generic_names():
     assert len(by["Студия маникюра"]) == 2
     assert len(by["Ли-Лак"]) == 1 and by["Ли-Лак"][0]["email"] == "lilak@yandex.ru"
     assert by["Мастер Оля"][0]["_sites"] == []                              # mst.link и yclients — не сайт
-    assert stats["branches"] == 2
+    assert len(by["Гостевой дом"]) == 2 and [l["_sites"] for l in by["Гостевой дом"]][1] == []
+    assert len(by["Сканди"]) == 2 and by["Сканди"][1]["_sites"] == []        # без сайта не потерялся
+    assert stats["branches"] == 3
+
+
+def test_booking_aggregators_are_not_a_site_and_vk_check_trusts_site_field():
+    from lsbot.finder import is_social_or_aggregator, enrich_with_vk
+    for u in ("https://sutochno.ru/123", "homereserve.ru/abc", "https://reservationsteps.ru/x", "cutt.ly/a"):
+        assert is_social_or_aggregator(u)
+
+    class FakeVK:
+        can_check_groups = True
+        skip_dead = True
+        def get_groups(self, keys):
+            return [{"id": 1, "screen_name": "dom1", "site": "",
+                     "description": "Бронь на sutochno.ru/55 и avito.ru, пишите dom1@mail.ru", "can_message": 1},
+                    {"id": 2, "screen_name": "dom2", "site": "https://dom2.ru", "can_message": 1}]
+        def check_alive(self, u):
+            return True
+    leads = [{"name": "Дом 1", "screen_name": "dom1"}, {"name": "Дом 2", "screen_name": "dom2"}]
+    st = {}
+    out = enrich_with_vk(FakeVK(), leads, st)
+    assert [l["name"] for l in out] == ["Дом 1"] and st["with_site"] == 1
+    assert out[0]["email"] == "dom1@mail.ru" and out[0]["vk_group_id"] == 1
 
 
 def test_parallel_site_checks():

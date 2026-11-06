@@ -244,7 +244,10 @@ GENERIC_WORDS = set("""студия студио салон салона каб�
 красоты красота beauty бьюти парикмахерская парикмахер парикмахерские стрижка стрижки
 брови бровей ресницы ресниц студия-салон и для на в эстетики эстетика спа spa массаж
 массажа косметология косметолог косметологии барбершоп барбер ателье шиномонтаж автосервис
-кафе кофейня ремонт центр студии школа""".split())
+кафе кофейня ремонт центр студии школа
+дом домик домики дома гостевой гостевые гостиница отель мини-отель хостел база отдыха отдых
+коттедж коттеджи усадьба шале баня бани сауна баня-сауна глэмпинг кемпинг загородный
+уютный уютная у озера реки леса лесу пруда""".split())
 
 
 def _name_key(name: str) -> str:
@@ -256,18 +259,52 @@ def is_generic(name: str) -> bool:
     return not words or all(w in GENERIC_WORDS for w in words)
 
 
+def _contacts(lead) -> set:
+    """Чем можно опознать одну и ту же компанию: телефон, почта, группа ВК, домен сайта."""
+    from .finder import _domain
+    out = set()
+    if lead.get("phone"):
+        d = re.sub(r"\D", "", lead["phone"])[-10:]
+        if len(d) >= 6:
+            out.add("p:" + d)
+    if lead.get("email"):
+        out.add("e:" + lead["email"].lower())
+    if lead.get("screen_name"):
+        out.add("v:" + lead["screen_name"].lower())
+    if lead.get("vk_group_id"):
+        out.add("v:" + str(lead["vk_group_id"]))
+    for u in lead.get("_sites") or []:
+        out.add("s:" + _domain(u))
+    return out
+
+
 def merge_branches(leads: list) -> tuple:
     """Склеивает филиалы одной сети: если у любого филиала есть сайт — сайт есть у всей сети.
+    Филиалами считаются строки с одинаковым названием и общим контактом (телефон, почта, ВК, сайт)
+    или с одинаковым «фирменным» названием в одном городе. «Гостевой дом» в разных деревнях
+    с разными телефонами — это разные хозяева, их не склеиваем.
     Возвращает (лиды, сколько строк-филиалов склеено)."""
     groups, order = {}, []
     for lead in leads:
-        key = _name_key(lead["name"])
-        if is_generic(lead["name"]):
-            key = f"{key}|{lead['uid']}"          # безликие названия не склеиваем
-        if key not in groups:
-            groups[key] = []
+        name = _name_key(lead["name"])
+        contacts = _contacts(lead)
+        key = None
+        city = (lead.get("city") or "").strip().lower()
+        for k in order:
+            if k[0] != name:
+                continue
+            same_contact = bool(contacts & groups[k][1])
+            same_city = bool(city) and city == k[2] and not is_generic(lead["name"])
+            if same_contact or same_city:
+                key = k
+                break
+        if key is None:
+            key = (name, lead["uid"], city)
+            groups[key] = ([], set())
             order.append(key)
-        groups[key].append(lead)
+        groups[key][0].append(lead)
+        groups[key][1].update(contacts)
+    groups = {k: v[0] for k, v in groups.items()}
     result, merged = [], 0
     for key in order:
         group = groups[key]
